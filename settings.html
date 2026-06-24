@@ -1,0 +1,56 @@
+<div class="lovense-integration-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b data-i18n="Lovense Toy Integration">Lovense Toy Integration</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <div class="settings-group">
+                <label for="lovense_connectionMode">
+                    <span data-i18n="Connection Mode">Connection Mode</span>
+                </label>
+                <select id="lovense_connectionMode">
+                    <option value="local" {{#if (eq connectionMode 'local')}}selected{{/if}}>Local PC/Mac Connect</option>
+                    <option value="server" {{#if (eq connectionMode 'server')}}selected{{/if}}>Server Cloud API</option>
+                </select>
+            </div>
+
+            <div id="lovense_local_settings" class="settings-group {{#unless (eq connectionMode 'local')}}hidden{{/unless}}">
+                <label for="lovense_localPort">
+                    <span data-i18n="Local Port">Local Port</span>
+                </label>
+                <input id="lovense_localPort" type="text" value="{{localPort}}" />
+                
+                <label for="lovense_localDomain">
+                    <span data-i18n="Local Domain">Local Domain</span>
+                </label>
+                <input id="lovense_localDomain" type="text" value="{{localDomain}}" placeholder="127-0-0-1.lovense.club" />
+            </div>
+
+            <div id="lovense_server_settings" class="settings-group {{#if (eq connectionMode 'local')}}hidden{{/if}}">
+                <label for="lovense_developerToken">
+                    <span data-i18n="Developer Token">Developer Token</span>
+                </label>
+                <input id="lovense_developerToken" type="password" value="{{developerToken}}" />
+                
+                <label for="lovense_userId">
+                    <span data-i18n="User ID">User ID</span>
+                </label>
+                <input id="lovense_userId" type="text" value="{{userId}}" />
+                
+                <div class="security-warning">
+                    <small><i>Warning: Your Lovense Developer Token is saved in plain text. For local security, consider using Local PC/Mac Connect mode.</i></small>
+                </div>
+            </div>
+
+            <div class="settings-group">
+                <button id="lovense_test_connection" class="menu_button">
+                    <span data-i18n="Test Connection">Test Connection</span>
+                </button>
+                <div id="lovense_connection_status" class="status-indicator">
+                    <span data-i18n="Status: Disconnected">Status: Disconnected</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
