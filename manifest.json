@@ -1,12 +1,13 @@
 {
-    "display_name": "STExtension",
-    "loading_order": 1,
-    "requires": [],
-    "optional": [],
-    "js": "dist/index.js",
-    "css": "",
-    "author": "cgj8702",
+    "display_name": "Lovense Toy Integration",
+    "loading_order": 50,
+    "js": "index.js",
+    "css": "style.css",
+    "author": "AI Agent",
     "version": "1.0.0",
-    "homePage": "https://github.com/cgj8702/STExtension",
-    "auto_update": true
+    "auto_update": false,
+    "minimum_client_version": "1.12.0",
+    "hooks": {
+        "activate": "onActivate"
+    }
 }
