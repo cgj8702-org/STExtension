@@ -1,12 +1,12 @@
 {
-    "display_name": "Template Extension",
+    "display_name": "STExtension",
     "loading_order": 1,
     "requires": [],
     "optional": [],
     "js": "dist/index.js",
     "css": "",
-    "author": "Cohee1207",
+    "author": "cgj8702",
     "version": "1.0.0",
-    "homePage": "https://github.com/Cohee1207/Extension-ReactTemplate",
+    "homePage": "https://github.com/cgj8702/STExtension",
     "auto_update": true
 }
