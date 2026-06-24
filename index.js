@@ -13,10 +13,7 @@ let settings;
 let client;
 let cachedToys = {};
 let stContext = null;
-
-/**
- * Structured Output Schema for high-reliability haptic responses.
- */
+let isNativeSupported = false;
 
 function getSettings() {
     const { extensionSettings } = stContext;
@@ -44,28 +41,39 @@ async function updateToyCache() {
 }
 
 /**
- * Prompt Interceptor: Tells the LLM which toys are connected.
- * Exported to window to be accessible by SillyTavern.
+ * Prompt Interceptor: Injects state awareness (toy list) and, 
+ * if native tools are unsupported, provides formatting instructions for fallback.
  */
 window.injectLovenseContext = async function(chat, contextSize, abort, type) {
     if (!Array.isArray(chat) || chat.length === 0) return;
     
+    // 1. Inject Toy State Awareness (Always)
     const toyKeys = Object.keys(cachedToys);
-    if (toyKeys.length === 0) return;
+    if (toyKeys.length > 0) {
+        const toyDescriptions = toyKeys.map(id => {
+            const toy = cachedToys[id];
+            return `- ${toy.name || id} (ID: ${id}): Status: ${toy.status === "1" ? 'Connected' : 'Disconnected'}, Battery: ${toy.battery ?? '?'}%`;
+        }).join('\n');
 
-    const toyDescriptions = toyKeys.map(id => {
-        const toy = cachedToys[id];
-        return `- ${toy.name || id} (ID: ${id}): Status: ${toy.status === "1" ? 'Connected' : 'Disconnected'}, Battery: ${toy.battery ?? '?'}%`;
-    }).join('\n');
+        const stateNote = {
+            is_user: false,
+            name: "System Note (Lovense State)",
+            send_date: Date.now(),
+            mes: `[SYSTEM INFO: The user has the following physical Lovense toy(s) active and connected:\n${toyDescriptions}\nEnsure that any touch, physical intimacy, or physical reactions in the narrative correspond realistically to these active devices.]`
+        };
+        chat.splice(chat.length - 1, 0, stateNote);
+    }
 
-    const systemNote = {
-        is_user: false,
-        name: "System Note (Lovense)",
-        send_date: Date.now(),
-        mes: `[SYSTEM INFO: The user has the following physical Lovense toy(s) active and connected:\n${toyDescriptions}\nEnsure that any touch, physical intimacy, or physical reactions in the narrative correspond realistically to these active devices.]`
-    };
-
-    chat.splice(chat.length - 1, 0, systemNote);
+    // 2. Inject Fallback Instructions (Only if native tool calling is unsupported)
+    if (!isNativeSupported) {
+        const fallbackInstruction = {
+            is_user: false,
+            name: "System Note (Lovense Instructions)",
+            send_date: Date.now(),
+            mes: `[LOVENSE SYSTEM INSTRUCTION: If the current narrative, action, or intimacy warrants physical haptic feedback, you must append the following exact code block to the very end of your response. Substitute your desired values:\`\`\`lovense\n{\n  "action": "Vibrate", // Options: Vibrate, Rotate, Pump, Stop\n  "strength": 10,       // Intensity (1-20 for Vibrate/Rotate, 1-3 for Pump)\n  "duration_sec": 5     // Duration in seconds (1-20)\n}\`\`\`\nDo not write any narrative text after this block. If no physical stimulation is happening in this turn, do not append the block.]`
+        };
+        chat.splice(chat.length - 1, 0, fallbackInstruction);
+    }
 };
 
 function handleToolResponse(apiResponse, action, strength, duration) {
@@ -85,6 +93,48 @@ function handleToolResponse(apiResponse, action, strength, duration) {
         status: "failed",
         reason: `API Error ${apiResponse.code}`,
         narrative_prompt: "The physical command failed. Continue narrative without assuming stimulation."
+    });
+}
+
+/**
+ * Fallback Path: Parser hook to catch, execute, and remove Markdown-JSON blocks.
+ */
+function registerParserHook(lovenseClient) {
+    const { messageFormatter } = stContext;
+    if (!messageFormatter) {
+        console.error("[Lovense] messageFormatter not found in context.");
+        return;
+    }
+
+    messageFormatter.addHook((mes, ctx) => {
+        // Skip user-sent messages
+        if (ctx.isUser) return mes;
+
+        // Regex to search for the custom lovense code block
+        const lovenseRegex = /```lovense\s*([\s\S]*?)\s*```/g;
+        let match;
+        
+        // Extract and execute all commands found in the message
+        while ((match = lovenseRegex.exec(mes)) !== null) {
+            try {
+                const commandData = JSON.parse(match[1]);
+                console.log("[Lovense Fallback] Captured command payload:", commandData);
+                
+                lovenseClient.sendCommand({
+                    action: commandData.action,
+                    strength: commandData.strength,
+                    duration: commandData.duration_sec
+                }).catch(e => console.error("[Lovense Fallback] Command failed:", e));
+            } catch (e) {
+                console.error("[Lovense Fallback] Failed to parse JSON command block:", e);
+            }
+        }
+
+        // Clean the code block out of the text so it never displays in the chat UI
+        return mes.replace(lovenseRegex, '').trim();
+    }, {
+        stage: (messageFormatter.stage || { BEFORE_REGEX: 0 })?.BEFORE_REGEX || 0,
+        order: (messageFormatter.order || { EARLY: 0 })?.EARLY || 0
     });
 }
 
@@ -235,16 +285,26 @@ function registerLovenseTools() {
 
 export async function onActivate() {
     try {
-        // Use window.SillyTavern to avoid linting errors and ensure global access
         stContext = window.SillyTavern.getContext();
         if (!stContext) throw new Error("SillyTavern context not found.");
 
         settings = getSettings();
         client = new LovenseClient(settings);
 
+        // Detect native tool support
+        isNativeSupported = stContext.isToolCallingSupported();
+        console.log(`[Lovense] Native Tool Calling supported: ${isNativeSupported}`);
+
         await updateUI();
         registerLovenseSlashCommands();
-        registerLovenseTools();
+
+        if (isNativeSupported) {
+            console.log("[Lovense] Registering native tool path...");
+            registerLovenseTools();
+        } else {
+            console.log("[Lovense] Enabling fallback pipeline...");
+            registerParserHook(client);
+        }
 
         await updateToyCache();
         setInterval(updateToyCache, 30000);
