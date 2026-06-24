@@ -21,6 +21,7 @@ const defaultSettings = Object.freeze({
 
 let settings;
 let client;
+let cachedToys = {};
 
 function getSettings() {
     if (!extensionSettings[MODULE_NAME]) {
@@ -34,6 +35,80 @@ function getSettings() {
     return extensionSettings[MODULE_NAME];
 }
 
+/**
+ * Periodically update the toy cache for the prompt interceptor.
+ */
+async function updateToyCache() {
+    if (!client) return;
+    try {
+        const toys = await client.getToys();
+        if (!toys.error) {
+            cachedToys = toys;
+        }
+    } catch (e) {
+        console.warn("Lovense: Could not update toy cache.", e);
+    }
+}
+
+/**
+ * Prompt Interceptor: Tells the LLM which toys are connected and their capabilities.
+ */
+globalThis.injectLovenseContext = async function(chat, contextSize, abort, type) {
+    const toyKeys = Object.keys(cachedToys);
+    if (toyKeys.length === 0) return;
+
+    const toyDescriptions = toyKeys.map(id => {
+        const toy = cachedToys[id];
+        return `- ${toy.name || id} (ID: ${id}): Status: ${toy.status == 1 ? 'Connected' : 'Disconnected'}, Battery: ${toy.battery ?? '?'}%`;
+    }).join('\n');
+
+    const systemNote = {
+        is_user: false,
+        name: "System Note (Lovense)",
+        send_date: Date.now(),
+        mes: `[SYSTEM INFO: The user has the following physical Lovense toy(s) active and connected:\n${toyDescriptions}\nEnsure that any touch, physical intimacy, or physical reactions in the narrative correspond realistically to these active devices. You can trigger physical haptic feedback by calling the 'control_lovense_toy' tool when the story or user actions dictate it.]`
+    };
+
+    // Insert the system note just before the user's latest message to keep it high-priority
+    chat.splice(chat.length - 1, 0, systemNote);
+};
+
+/**
+ * Formats API responses into narrative-friendly prompts for the LLM.
+ */
+function handleToolResponse(apiResponse, action, strength, duration) {
+    if (apiResponse.code === 200 || apiResponse.result === true) {
+        if (action.toLowerCase() === 'stop') {
+            return JSON.stringify({
+                status: "success",
+                narrative_prompt: "The connected toy has successfully stopped. In your next response, describe the sudden transition to stillness and how the character or user relaxes."
+            });
+        }
+        
+        return JSON.stringify({
+            status: "success",
+            action_triggered: action,
+            intensity: strength,
+            duration: `${duration} seconds`,
+            narrative_prompt: `The haptic device successfully executed the ${action} action at level ${strength} of intensity for ${duration} seconds. In your next turn, describe the physical sensations, warmth, vibrations, or mechanical movements the character or user experiences as a direct result of this physical stimulation.`
+        });
+    }
+
+    const errorMessages = {
+        401: "Toy not found. The specified device might be turned off or out of range.",
+        402: "Toy not connected. Ensure the device is paired in the Lovense Connect app.",
+        403: "Toy does not support this command. The user's active toy cannot perform this specific action.",
+        404: "Invalid Parameter. Please check the intensity or duration range and try again."
+    };
+    const friendlyError = errorMessages[apiResponse.code] || `Server returned error code ${apiResponse.code}.`;
+
+    return JSON.stringify({
+        status: "failed",
+        reason: friendlyError,
+        narrative_prompt: `The physical command could not be delivered to the device (${friendlyError}). You may either gently mention the connection issue in character (e.g., a device losing connection or acting up) or continue the narrative normally without assuming the user felt the physical stimulation.`
+    });
+}
+
 async function updateUI() {
     const settingsHtml = await renderExtensionTemplateAsync(
         'third-party/STExtension', 
@@ -42,7 +117,6 @@ async function updateUI() {
     );
     $('#extensions_settings2').append(settingsHtml);
 
-    // Bind inputs
     $('#lovense_connectionMode').on('change', (e) => {
         settings.connectionMode = e.target.value;
         toggleSettingsVisibility();
@@ -148,40 +222,62 @@ function registerLovenseTools() {
     registerFunctionTool({
         name: 'control_lovense_toy',
         displayName: 'Control Lovense Toy',
-        description: 'Sends a physical command (vibration, rotation, air pump contraction, etc.) to the user\'s connected Lovense adult toy. Use this to provide real-time haptic feedback or physical responses based on intimate, romantic, or exciting narrative events in the chat.',
+        description: 'Triggers physical haptic feedback on the user\'s connected Lovense toy based on the narrative or intimate actions in the chat.',
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
             properties: {
                 action: {
                     type: 'string',
-                    enum: ['Vibrate', 'Rotate', 'Pump', 'Stop', 'All'],
-                    description: 'The physical action type. Select Vibrate for vibrations, Rotate for internal rotation, Pump for air contractions, All to trigger everything, or Stop to cease all motion.'
+                    enum: ['Vibrate', 'Rotate', 'Pump', 'Thrusting', 'Fingering', 'Suction', 'Depth', 'All', 'Stop'],
+                    description: 'The physical action type. Use Vibrate for standard vibrations. Use Rotate/Thrusting/Fingering/Suction/Depth only if the connected toy supports it. Use Stop to halt all motion.'
                 },
                 strength: {
                     type: 'integer',
-                    description: 'The intensity level. For Vibrate, Rotate, and All, the range is 1 (weakest) to 20 (strongest). For Pump, the range is 1 to 3. Use 0 to stop.'
+                    description: 'The intensity level. CRITICAL: For Vibrate, Rotate, Thrusting, Fingering, Suction, and All, the range is 1 to 20. For Pump and Depth, the range is strictly 1 to 3. Use 0 to stop.'
                 },
                 duration: {
                     type: 'integer',
-                    description: 'The duration of the action in seconds. Choose a value between 1 and 20 seconds. Use 0 for an indefinite run.'
+                    description: 'The duration of the action in seconds (1 to 20). Use 0 for continuous/indefinite running.'
+                },
+                toyId: {
+                    type: 'string',
+                    description: 'Optional. The specific Toy ID to control. If omitted, the command applies to all connected toys.'
                 }
             },
             required: ['action', 'strength', 'duration']
         },
-        action: async ({ action, strength, duration }) => {
+        action: async ({ action, strength, duration, toyId }) => {
+            let sanitizedStrength = strength;
+            if (['Pump', 'Depth'].includes(action)) {
+                sanitizedStrength = Math.min(Math.max(strength, 0), 3);
+            } else {
+                sanitizedStrength = Math.min(Math.max(strength, 0), 20);
+            }
+
+            let finalDuration = duration;
+            if (duration === 0) {
+                finalDuration = 60; 
+            } else {
+                finalDuration = Math.min(Math.max(duration, 1), 60);
+            }
+
             try {
-                const response = await client.sendCommand({ action, strength, duration });
-                if (response.code === 200 || response.result === true) {
-                    return `Successfully triggered toy: ${action} at strength ${strength} for ${duration}s.`;
-                } else {
-                    return `Toy command failed: ${response.message || 'Unknown error'}`;
-                }
+                const response = await client.sendCommand({ 
+                    action, 
+                    strength: sanitizedStrength, 
+                    duration: finalDuration, 
+                    toyId 
+                });
+                return handleToolResponse(response, action, sanitizedStrength, finalDuration);
             } catch (error) {
-                return `Error connecting to Lovense: ${error.message}`;
+                return JSON.stringify({
+                    status: "error",
+                    message: `Failed to connect to Lovense local server: ${error.message}. Please remind the user to check their connection.`
+                });
             }
         },
-        formatMessage: ({ action, strength }) => `[Lovense] Sending ${action} (Level ${strength})...`,
+        formatMessage: ({ action, strength }) => `[Lovense] Sending ${action} command (Level ${strength})...`,
         stealth: false
     });
 }
@@ -193,6 +289,9 @@ export async function onActivate() {
     await updateUI();
     registerLovenseSlashCommands();
     registerLovenseTools();
+
+    await updateToyCache();
+    setInterval(updateToyCache, 30000);
 
     console.log('Lovense Toy Integration activated');
 }
