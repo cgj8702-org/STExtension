@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import Settings from './Settings';
 
 // Choose the root container for the extension's main UI
 const rootContainer = document.getElementById('extensions_settings');
@@ -10,6 +11,7 @@ rootContainer.appendChild(rootElement);
 const root = ReactDOM.createRoot(rootElement);
 root.render(
     <React.StrictMode>
+        <Settings />
         <App />
     </React.StrictMode>
 );
