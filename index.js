@@ -1,4 +1,7 @@
-import { LovenseClient } from './lovense-client.js';
+import { LovenseClient } from './lovense-client.js?v=11';
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import { SlashCommandArgument, ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
 
 const MODULE_NAME = 'lovense_integration';
 const defaultSettings = Object.freeze({
@@ -52,25 +55,61 @@ window.injectLovenseContext = async function(chat, contextSize, abort, type) {
     if (toyKeys.length > 0) {
         const toyDescriptions = toyKeys.map(id => {
             const toy = cachedToys[id];
-            return `- ${toy.name || id} (ID: ${id}): Status: ${toy.status === "1" ? 'Connected' : 'Disconnected'}, Battery: ${toy.battery ?? '?'}%`;
+            return `- ${toy.name || id} (ID: ${id}): Status: ${toy.status === "1" ? 'Connected' : 'Disconnected'}, Battery: ${toy.battery ?? '?'}% (Type: External Vibrator, placed on user's panties/clitoris)`;
         }).join('\n');
 
         const stateNote = {
             is_user: false,
             name: "System Note (Lovense State)",
             send_date: Date.now(),
-            mes: `[SYSTEM INFO: The user has the following physical Lovense toy(s) active and connected:\n${toyDescriptions}\nEnsure that any touch, physical intimacy, or physical reactions in the narrative correspond realistically to these active devices.]`
+            mes: `[SYSTEM INFO: The user has the following physical Lovense device active and connected:\n${toyDescriptions}\nEnsure that any physical caressing, touch, or reactions in the narrative correspond realistically to this device.]`
         };
         chat.splice(chat.length - 1, 0, stateNote);
     }
 
-    // 2. Inject Fallback Instructions (Only if native tool calling is unsupported)
-    if (!isNativeSupported) {
+    // 2. Inject explicit instructions based on tool calling capability
+    if (isNativeSupported) {
+        const toolInstruction = {
+            is_user: false,
+            name: "System Note (Lovense Tool Instruction)",
+            send_date: Date.now(),
+            mes: `[LOVENSE SYSTEM INSTRUCTION: You have access to the tool 'control_lovense_toy' to control the user's active physical Lovense device (Ferri: external vibrator).
+Whenever there is physical contact, touch, caressing, or intimacy in the narrative, you MUST call 'control_lovense_toy'.
+Required parameters:
+- 'action': 'Vibrate' (or 'Stop')
+- 'strength': Integer from 1 to 20
+- 'duration': Integer from 1 to 20 seconds
+- 'toyId': 'mock-ferri-001'
+
+Alternatively, you can trigger the device by adding a "lovense" key to the character object inside your JSON tracker block at the start of your response. Example format to add to your character tracker:
+"lovense": {
+  "action": "Vibrate",
+  "strength": 8, // Intensity (1-20)
+  "duration": 12 // Duration in seconds (1-20)
+}
+If no physical stimulation is occurring in this turn, omit the "lovense" key from your tracker.]`
+        };
+        chat.splice(chat.length - 1, 0, toolInstruction);
+    } else {
         const fallbackInstruction = {
             is_user: false,
             name: "System Note (Lovense Instructions)",
             send_date: Date.now(),
-            mes: `[LOVENSE SYSTEM INSTRUCTION: If the current narrative, action, or intimacy warrants physical haptic feedback, you must append the following exact code block to the very end of your response. Substitute your desired values:\`\`\`lovense\n{\n  "action": "Vibrate", // Options: Vibrate, Rotate, Pump, Stop\n  "strength": 10,       // Intensity (1-20 for Vibrate/Rotate, 1-3 for Pump)\n  "duration_sec": 5     // Duration in seconds (1-20)\n}\`\`\`\nDo not write any narrative text after this block. If no physical stimulation is happening in this turn, do not append the block.]`
+            mes: `[LOVENSE SYSTEM INSTRUCTION: If the current narrative, action, or intimacy warrants physical haptic feedback, you MUST trigger physical stimulation by adding a "lovense" key to the character object inside your JSON tracker block at the start of your response. Example format:
+"lovense": {
+  "action": "Vibrate",
+  "strength": 8, // Intensity (1-20)
+  "duration": 12 // Duration in seconds (1-20)
+}
+If you do not use the JSON tracker block, you MUST append a standalone Markdown JSON code block to the very end of your response:
+\`\`\`lovense
+{
+  "action": "Vibrate",
+  "strength": 10,
+  "duration_sec": 5,
+  "toyId": "mock-ferri-001"
+}
+\`\`\`]`
         };
         chat.splice(chat.length - 1, 0, fallbackInstruction);
     }
@@ -96,45 +135,172 @@ function handleToolResponse(apiResponse, action, strength, duration) {
     });
 }
 
+function parseAttributes(attrString) {
+    const attrs = {};
+    if (!attrString) return attrs;
+    
+    // Check if attributes look like JSON: {device_id: "...", ...}
+    const trimmed = attrString.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+            // Quote unquoted keys, e.g. device_id: -> "device_id":
+            const cleaned = trimmed
+                .replace(/([{,]\s*)([a-zA-Z0-9_\-]+)\s*:/g, '$1"$2":')
+                .replace(/'/g, '"');
+            return JSON.parse(cleaned);
+        } catch (e) {
+            console.error("[Lovense Fallback] Failed to parse curly-brace attributes:", e);
+        }
+    }
+
+    // Standard attribute pattern: key="value" or key='value' or key=value
+    const regex = /([a-zA-Z0-9_\-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
+    let match;
+    while ((match = regex.exec(attrString)) !== null) {
+        const key = match[1];
+        const val = match[2] ?? match[3] ?? match[4];
+        attrs[key] = val;
+    }
+    return attrs;
+}
+
 /**
- * Fallback Path: Parser hook to catch, execute, and remove Markdown-JSON blocks.
+ * Fallback Path: Parser hook to catch, execute, and remove Markdown-JSON blocks or manual XML tags.
  */
 function registerParserHook(lovenseClient) {
-    const { messageFormatter } = stContext;
-    if (!messageFormatter) {
-        console.error("[Lovense] messageFormatter not found in context.");
+    const { eventSource, eventTypes } = stContext;
+    if (!eventSource || !eventTypes) {
+        console.error("[Lovense] eventSource or eventTypes not found in context.");
         return;
     }
 
-    messageFormatter.addHook((mes, ctx) => {
-        // Skip user-sent messages
-        if (ctx.isUser) return mes;
+    const isMock = settings.connectionMode === 'mock';
 
-        // Regex to search for the custom lovense code block
-        const lovenseRegex = /```lovense\s*([\s\S]*?)\s*```/g;
-        let match;
+    function searchForHapticCommand(obj) {
+        if (!obj || typeof obj !== 'object') return null;
         
-        // Extract and execute all commands found in the message
-        while ((match = lovenseRegex.exec(mes)) !== null) {
+        // If it has action, and either strength or duration, it's a command
+        if (obj.action && (obj.strength !== undefined || obj.duration !== undefined || obj.duration_sec !== undefined)) {
+            return obj;
+        }
+        
+        // Check for 'lovense' key
+        if (obj.lovense && typeof obj.lovense === 'object') {
+            return obj.lovense;
+        }
+        // Check for 'haptic_command' key
+        if (obj.haptic_command && typeof obj.haptic_command === 'object') {
+            return obj.haptic_command;
+        }
+        
+        // Recurse arrays
+        if (Array.isArray(obj)) {
+            for (const item of obj) {
+                const found = searchForHapticCommand(item);
+                if (found) return found;
+            }
+        } else {
+            // Recurse object keys
+            for (const key of Object.keys(obj)) {
+                const found = searchForHapticCommand(obj[key]);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+
+    function executeFallbackCommand(commandData) {
+        const prefix = isMock ? '[Lovense Mock Parser]' : '[Lovense Parser]';
+        
+        let action = commandData.action || 'Vibrate';
+        if (action.toLowerCase() === 'pulse' || action.toLowerCase() === 'random') {
+            action = 'Vibrate';
+        }
+
+        let strength = commandData.strength !== undefined ? Number(commandData.strength) : 10;
+        // Handle models that hallucinated 1-100 scales instead of 1-20
+        if (strength > 20) {
+            strength = Math.round(strength * 20 / 100);
+        }
+        strength = Math.min(Math.max(strength, 0), 20);
+
+        let duration = commandData.duration_sec !== undefined ? Number(commandData.duration_sec) : (commandData.duration !== undefined ? Number(commandData.duration) : 5);
+        duration = Math.min(Math.max(duration, 1), 60);
+
+        const toyId = commandData.toyId || commandData.device_id || 'mock-ferri-001';
+
+        console.warn(`${prefix} Executing: action=${action}, strength=${strength}, duration=${duration}s, toyId=${toyId}`);
+
+        if (isMock) {
+            window.toastr.info(
+                `${action} @ Lvl ${strength} for ${duration}s`,
+                'Lovense Mock (Parser)',
+            );
+        }
+        
+        lovenseClient.sendCommand({
+            action,
+            strength,
+            duration,
+            toyId
+        }).catch(e => console.error(`${prefix} Command failed:`, e));
+    }
+
+    let lastProcessedText = "";
+
+    function processMessage(chatIndex) {
+        const { chat } = stContext;
+        const message = chat[chatIndex];
+        if (!message || message.is_user) return;
+        
+        if (message.mes === lastProcessedText) {
+            return;
+        }
+        lastProcessedText = message.mes;
+        
+        const mes = message.mes;
+        if (!mes) return;
+
+        console.log("[Lovense Parser] Processing text for commands:", mes);
+
+        // 1. Parse JSON blocks (handles both ```json and ```lovense blocks)
+        const jsonBlockRegex = /```(?:json|lovense)\s*([\s\S]*?)\s*```/g;
+        let match;
+        while ((match = jsonBlockRegex.exec(mes)) !== null) {
             try {
-                const commandData = JSON.parse(match[1]);
-                console.log("[Lovense Fallback] Captured command payload:", commandData);
-                
-                lovenseClient.sendCommand({
-                    action: commandData.action,
-                    strength: commandData.strength,
-                    duration: commandData.duration_sec
-                }).catch(e => console.error("[Lovense Fallback] Command failed:", e));
+                const parsedData = JSON.parse(match[1]);
+                const command = searchForHapticCommand(parsedData);
+                if (command) {
+                    console.warn("[Lovense Parser] Found haptic command inside JSON block:", command);
+                    executeFallbackCommand(command);
+                }
             } catch (e) {
-                console.error("[Lovense Fallback] Failed to parse JSON command block:", e);
+                // Ignore parsing errors for general json blocks (like the RPG tracker before it has a lovense key)
             }
         }
 
-        // Clean the code block out of the text so it never displays in the chat UI
-        return mes.replace(lovenseRegex, '').trim();
-    }, {
-        stage: (messageFormatter.stage || { BEFORE_REGEX: 0 })?.BEFORE_REGEX || 0,
-        order: (messageFormatter.order || { EARLY: 0 })?.EARLY || 0
+        // 2. Parse XML tags: <call:control_lovense_toy attributes /> or <call:control_lovense_toy{attributes}>
+        const tagRegex = /<call:control_lovense_toy\s*([\s\S]*?)\s*(?:\/>|>)/g;
+        while ((match = tagRegex.exec(mes)) !== null) {
+            try {
+                const attrString = match[1];
+                const parsedAttrs = parseAttributes(attrString);
+                if (parsedAttrs && Object.keys(parsedAttrs).length > 0) {
+                    executeFallbackCommand(parsedAttrs);
+                }
+            } catch (e) {
+                console.error("[Lovense Fallback] Failed to parse XML-style tag attributes:", e);
+            }
+        }
+    }
+
+    // Register listeners for rendered and received bot messages
+    eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, (chatIndex) => {
+        processMessage(chatIndex);
+    });
+
+    eventSource.on(eventTypes.MESSAGE_RECEIVED, (chatIndex) => {
+        processMessage(chatIndex);
     });
 }
 
@@ -151,9 +317,15 @@ async function updateUI() {
         console.error("[Lovense] settings container #extensions_settings2 not found.");
         return;
     }
+
+    // Clean up any existing panel to prevent duplicate IDs and event listeners
+    container.find('.lovense-integration-settings').remove();
+    
+    console.log('[Lovense UI] Appending settings panel to container');
     container.append(settingsHtml);
 
     window.$('#lovense_connectionMode').on('change', (e) => {
+        console.warn('[Lovense UI] Connection Mode dropdown changed to:', e.target.value);
         settings.connectionMode = e.target.value;
         toggleSettingsVisibility();
         saveSettingsDebounced();
@@ -180,14 +352,19 @@ async function updateUI() {
     });
 
     window.$('#lovense_test_connection').on('click', async () => {
+        console.warn('[Lovense UI] Test Connection clicked. Current mode:', settings.connectionMode);
         const statusEl = window.$('#lovense_connection_status');
         statusEl.text('Testing...');
         try {
             const result = await client.getToys();
+            console.warn('[Lovense UI] Test Connection result:', result);
             if (result.error) throw new Error(result.error);
-            statusEl.text('Status: Connected');
-            window.toastr.success('Lovense connection successful!');
+            const isMock = settings.connectionMode === 'mock';
+            const toyCount = Object.keys(result).length;
+            statusEl.text(isMock ? `Status: Mock (${toyCount} simulated toys)` : 'Status: Connected');
+            window.toastr.success(isMock ? `Mock mode active! ${toyCount} simulated toys loaded.` : 'Lovense connection successful!');
         } catch (e) {
+            console.error('[Lovense UI] Test Connection failed:', e);
             statusEl.text('Status: Disconnected');
             window.toastr.error(`Connection failed: ${e.message}`);
         }
@@ -197,17 +374,13 @@ async function updateUI() {
 }
 
 function toggleSettingsVisibility() {
-    if (settings.connectionMode === 'local') {
-        window.$('#lovense_local_settings').removeClass('hidden');
-        window.$('#lovense_server_settings').addClass('hidden');
-    } else {
-        window.$('#lovense_local_settings').addClass('hidden');
-        window.$('#lovense_server_settings').removeClass('hidden');
-    }
+    const mode = settings.connectionMode;
+    window.$('#lovense_local_settings').toggleClass('hidden', mode !== 'local');
+    window.$('#lovense_server_settings').toggleClass('hidden', mode !== 'server');
+    window.$('#lovense_mock_settings').toggleClass('hidden', mode !== 'mock');
 }
 
 function registerLovenseSlashCommands() {
-    const { SlashCommandParser, SlashCommand, SlashCommandArgument, ARGUMENT_TYPE } = window;
     
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'lovense',
@@ -247,20 +420,32 @@ function registerLovenseTools() {
     const { registerFunctionTool, isToolCallingSupported } = stContext;
     if (!isToolCallingSupported()) return;
 
+    const isMock = settings.connectionMode === 'mock';
+
     registerFunctionTool({
         name: 'control_lovense_toy',
         displayName: 'Control Lovense Toy',
-        description: 'Triggers physical haptic feedback on the user\'s connected Lovense toy.',
+        description: 'Mandatory tool to trigger physical haptic feedback (vibration) on the user\'s physical Lovense Ferri toy (external vibrator). Invoke this tool immediately whenever there is touch, intimacy, caressing, or physical reactions in the narrative.',
         parameters: {
             type: 'object',
             properties: {
                 action: { 
                     type: 'string', 
-                    enum: ['Vibrate', 'Rotate', 'Pump', 'Thrusting', 'Fingering', 'Suction', 'Depth', 'All', 'Stop'] 
+                    enum: ['Vibrate', 'Stop'],
+                    description: 'The movement command to execute. Choose "Vibrate" to trigger vibrations. Choose "Stop" to halt all activity.'
                 },
-                strength: { type: 'integer' },
-                duration: { type: 'integer' },
-                toyId: { type: 'string' }
+                strength: { 
+                    type: 'integer',
+                    description: 'The intensity level of the vibration. Must be an integer between 1 and 20 (1 is gentlest, 20 is most intense).'
+                },
+                duration: { 
+                    type: 'integer',
+                    description: 'The duration of the physical vibration in seconds. Must be an integer between 1 and 20.'
+                },
+                toyId: { 
+                    type: 'string',
+                    description: 'Optional. The ID of the connected Ferri device: "mock-ferri-001".'
+                }
             },
             required: ['action', 'strength', 'duration']
         },
@@ -271,6 +456,14 @@ function registerLovenseTools() {
             
             let finalDuration = duration === 0 ? 60 : Math.min(Math.max(duration, 1), 60);
 
+            if (isMock) {
+                console.log(`[Lovense Mock Tool] action=${action}, strength=${sanitizedStrength}, duration=${finalDuration}s, toyId=${toyId || 'all'}`);
+                window.toastr.info(
+                    `${action} @ Lvl ${sanitizedStrength} for ${finalDuration}s`,
+                    'Lovense Mock (Tool Call)',
+                );
+            }
+
             try {
                 const response = await client.sendCommand({ action, strength: sanitizedStrength, duration: finalDuration, toyId });
                 return handleToolResponse(response, action, sanitizedStrength, finalDuration);
@@ -278,7 +471,10 @@ function registerLovenseTools() {
                 return JSON.stringify({ status: "error", message: error.message });
             }
         },
-        formatMessage: ({ action, strength }) => `[Lovense] Sending ${action} (Lvl ${strength})...`,
+        formatMessage: ({ action, strength }) => {
+            const prefix = isMock ? '[Lovense Mock]' : '[Lovense]';
+            return `${prefix} Sending ${action} (Lvl ${strength})...`;
+        },
         stealth: false
     });
 }
@@ -291,6 +487,12 @@ export async function onActivate() {
         settings = getSettings();
         client = new LovenseClient(settings);
 
+        const isMock = settings.connectionMode === 'mock';
+        if (isMock) {
+            console.log('%c[Lovense] MOCK MODE ACTIVE - No real API calls will be made', 'color: #00e5ff; font-weight: bold; font-size: 14px;');
+            window.toastr.info('Mock mode active. Simulated toys loaded, no real API calls.', 'Lovense Integration');
+        }
+
         // Detect native tool support
         isNativeSupported = stContext.isToolCallingSupported();
         console.log(`[Lovense] Native Tool Calling supported: ${isNativeSupported}`);
@@ -301,13 +503,16 @@ export async function onActivate() {
         if (isNativeSupported) {
             console.log("[Lovense] Registering native tool path...");
             registerLovenseTools();
-        } else {
-            console.log("[Lovense] Enabling fallback pipeline...");
-            registerParserHook(client);
         }
+        
+        // Always register the parser hook to clean up and execute any manual XML/JSON blocks outputted in text
+        console.log("[Lovense] Enabling parser hook pipeline...");
+        registerParserHook(client);
 
         await updateToyCache();
-        setInterval(updateToyCache, 30000);
+        if (!isMock) {
+            setInterval(updateToyCache, 30000);
+        }
 
         console.log('Lovense Toy Integration activated successfully');
     } catch (e) {

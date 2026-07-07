@@ -165,6 +165,7 @@ export default function Settings() {
                 <select name="mode" value={settings.mode} onChange={handleChange}>
                     <option value="local">Local (LAN)</option>
                     <option value="server">Server (cloud)</option>
+                    <option value="mock">Mock (Testing)</option>
                 </select>
             </label>
             <br /><br />

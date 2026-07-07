@@ -12,6 +12,7 @@
                 <select id="lovense_connectionMode">
                     <option value="local" {{#if (eq connectionMode 'local')}}selected{{/if}}>Local PC/Mac Connect</option>
                     <option value="server" {{#if (eq connectionMode 'server')}}selected{{/if}}>Server Cloud API</option>
+                    <option value="mock" {{#if (eq connectionMode 'mock')}}selected{{/if}}>Mock (Testing)</option>
                 </select>
             </div>
 
@@ -40,6 +41,14 @@
                 
                 <div class="security-warning">
                     <small><i>Warning: Your Lovense Developer Token is saved in plain text. For local security, consider using Local PC/Mac Connect mode.</i></small>
+                </div>
+            </div>
+
+            <div id="lovense_mock_settings" class="settings-group {{#unless (eq connectionMode 'mock')}}hidden{{/unless}}">
+                <div class="mock-info-banner">
+                    <strong>Mock Mode Active</strong>
+                    <p>Two simulated toys (Lush 3, Hush 2) are loaded. No real API calls are made.</p>
+                    <p><small>Commands are logged to the browser console (F12) and shown as toast notifications.</small></p>
                 </div>
             </div>
 

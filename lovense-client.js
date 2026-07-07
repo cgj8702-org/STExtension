@@ -7,12 +7,34 @@ export class LovenseClient {
         return this.settings.connectionMode === 'local';
     }
 
+    get isMock() {
+        return this.settings.connectionMode === 'mock';
+    }
+
     async sendCommand({ action, strength, duration, toyId = null }) {
-        if (this.isLocal) {
+        if (this.isMock) {
+            return this.sendMockCommand(action, strength, duration, toyId);
+        } else if (this.isLocal) {
             return this.sendLocalCommand(action, strength, duration, toyId);
         } else {
             return this.sendServerCommand(action, strength, duration, toyId);
         }
+    }
+
+    async sendMockCommand(action, strength, duration, toyId) {
+        const payload = { action, strength, duration, toyId };
+        console.log(
+            `[Lovense Mock] Command received:`,
+            `action=${action}, strength=${strength}, duration=${duration}s, toyId=${toyId || 'all'}`,
+        );
+        console.table(payload);
+
+        // Simulate realistic API latency (150-400ms)
+        const latency = 150 + Math.floor(Math.random() * 250);
+        await new Promise(resolve => setTimeout(resolve, latency));
+
+        console.log(`[Lovense Mock] Command executed successfully (simulated ${latency}ms latency)`);
+        return { code: 200, result: true, type: 'mock' };
     }
 
     async sendLocalCommand(action, strength, duration, toyId) {
@@ -68,6 +90,10 @@ export class LovenseClient {
     }
 
     async getToys() {
+        if (this.isMock) {
+            return this.getMockToys();
+        }
+
         if (!this.isLocal) {
             return { error: "Toy query only fully supported in Local Mode" };
         }
@@ -85,5 +111,20 @@ export class LovenseClient {
             console.error("Failed to query local Lovense toys:", e);
             throw e;
         }
+    }
+
+    getMockToys() {
+        console.log("[Lovense Mock] Returning simulated toy list");
+        return {
+            'mock-ferri-001': {
+                name: 'Ferri',
+                id: 'mock-ferri-001',
+                status: '1',
+                battery: 94,
+                type: 'ferri',
+                version: '',
+                nickName: 'My Ferri',
+            },
+        };
     }
 }

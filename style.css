@@ -29,3 +29,20 @@
     background-color: var(--main-bg-color, #fff);
     color: var(--main-text-color, #000);
 }
+
+.lovense-integration-settings .mock-info-banner {
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    background-color: rgba(0, 229, 255, 0.08);
+    color: var(--main-text-color, #ccc);
+}
+
+.lovense-integration-settings .mock-info-banner strong {
+    color: #00e5ff;
+}
+
+.lovense-integration-settings .mock-info-banner p {
+    margin: 4px 0 0;
+    line-height: 1.4;
+}

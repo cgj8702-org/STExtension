@@ -54,6 +54,13 @@ function getErrorMessage(code) {
 async function sendLovenseCommand(payload, settings) {
     if (!settings.enabled) return;
 
+    if (settings.mode === 'mock') {
+        console.log(`[Lovense React Mock] Payload received:`, payload);
+        const latency = 150 + Math.floor(Math.random() * 250);
+        await new Promise(resolve => setTimeout(resolve, latency));
+        return { code: 200, result: true };
+    }
+
     let url;
     let fetchOptions;
 
@@ -143,6 +150,21 @@ export async function stopAllToys(options = {}, settings) {
  * Returns a promise that resolves to the parsed toy object.
  */
 export async function getToys(settings) {
+    if (settings.mode === 'mock') {
+        console.log("[Lovense React Mock] Returning simulated toy list");
+        return {
+            'mock-ferri-001': {
+                name: 'Ferri',
+                id: 'mock-ferri-001',
+                status: '1',
+                battery: 94,
+                type: 'ferri',
+                version: '',
+                nickName: 'My Ferri',
+            },
+        };
+    }
+
     const payload = { command: "GetToys" };
     const data = await sendLovenseCommand(payload, settings);
     
@@ -161,6 +183,10 @@ export async function getToys(settings) {
  * Retrieve only the toy names.
  */
 export async function getToyNames(settings) {
+    if (settings.mode === 'mock') {
+        return ['Ferri'];
+    }
+
     const payload = { command: "GetToyName" };
     const data = await sendLovenseCommand(payload, settings);
     if (data && Array.isArray(data.data)) {
