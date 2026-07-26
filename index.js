@@ -582,7 +582,7 @@ function registerLovenseTools() {
     registerFunctionTool({
         name: 'control_lovense_toy',
         displayName: 'Control Lovense Toy',
-        description: 'Mandatory tool to trigger physical haptic feedback (vibration) on the user\'s physical Lovense Ferri toy (external vibrator). Invoke this tool immediately whenever there is touch, intimacy, caressing, or physical reactions in the narrative.',
+        description: 'Trigger, adjust, or stop physical haptic feedback (vibration or preset patterns) on the user\'s physical Lovense toy. Use autonomously or upon request for scene pacing, reward, discipline, verbal conditioning, or surprise sensations.',
         parameters: {
             type: 'object',
             properties: {
