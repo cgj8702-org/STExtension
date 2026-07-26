@@ -3,7 +3,7 @@ import { LovenseClient } from './lovense-client.js?v=11';
 import { SlashCommandParser } from '/scripts/slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '/scripts/slash-commands/SlashCommand.js';
 import { SlashCommandArgument, ARGUMENT_TYPE } from '/scripts/slash-commands/SlashCommandArgument.js';
-import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '/scripts/script.js';
+import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '/script.js';
 
 const MODULE_NAME = 'lovense_integration';
 const EXTENSION_PROMPT_TAG = 'lovense_control';
