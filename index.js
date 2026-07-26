@@ -2,14 +2,41 @@ import { LovenseClient } from './lovense-client.js?v=11';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { SlashCommandArgument, ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
+import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 
 const MODULE_NAME = 'lovense_integration';
+const EXTENSION_PROMPT_TAG = 'lovense_control';
+
+// Toy capability mappings
+const TOY_CAPABILITIES = {
+    'ferri': ['vibrate'],
+    'lush': ['vibrate'],
+    'hush': ['vibrate'],
+    'nora': ['vibrate', 'rotate'],
+    'diamo': ['vibrate', 'rotate'],
+    'ridge': ['vibrate', 'rotate'],
+    'max': ['vibrate', 'pump'],
+    'max 2': ['vibrate', 'pump'],
+    'gravity': ['vibrate', 'thrusting'],
+    'sex machine': ['vibrate', 'thrusting'],
+    'mini sex machine': ['vibrate', 'thrusting'],
+    'solace': ['vibrate', 'thrusting'],
+    'solace pro': ['vibrate', 'thrusting'],
+    'flexer': ['vibrate', 'fingering'],
+    'tenera': ['vibrate', 'suction'],
+    'tenera 2': ['vibrate', 'suction'],
+    'osci': ['vibrate', 'oscillate'],
+    'osci 2': ['vibrate', 'oscillate'],
+    'osci 3': ['vibrate', 'oscillate'],
+};
+
 const defaultSettings = Object.freeze({
     connectionMode: 'local',
     localPort: '30010',
     localDomain: '127-0-0-1.lovense.club',
     developerToken: '',
     userId: '',
+    customGuidelines: `1. Match intensity to context: gentle (1-10), moderate (11-15), intense (16-20)\n2. Use commands that fit the scene naturally\n3. Multiple commands per response allowed\n4. Commands loop until your next response`,
 });
 
 let settings;
@@ -17,6 +44,12 @@ let client;
 let cachedToys = {};
 let stContext = null;
 let isNativeSupported = false;
+
+// Command looping state
+let messageCommands = [];
+let loopInterval = null;
+let currentLoopIndex = 0;
+let isLooping = false;
 
 function getSettings() {
     const { extensionSettings } = stContext;
@@ -31,12 +64,84 @@ function getSettings() {
     return extensionSettings[MODULE_NAME];
 }
 
+/**
+ * Start looping collected commands from the current message.
+ * Commands play sequentially, each for its own duration, cycling infinitely.
+ */
+function startLoopingCommands() {
+    if (loopInterval) {
+        clearTimeout(loopInterval);
+        loopInterval = null;
+    }
+
+    if (!messageCommands || messageCommands.length === 0) {
+        return;
+    }
+
+    // Filter out stop commands and clone for safe mutation
+    const loopable = messageCommands
+        .filter(cmd => cmd.action?.toLowerCase() !== 'stop')
+        .map(cmd => {
+            const clone = { ...cmd };
+            // Normalize zero-duration to 30s for sequential playback
+            if (!clone.duration || clone.duration === 0) clone.duration = 30;
+            return clone;
+        });
+
+    if (loopable.length === 0) return;
+
+    console.log('[Lovense] Starting command loop with', loopable.length, 'commands');
+    currentLoopIndex = 0;
+    isLooping = true;
+
+    const playNext = async () => {
+        if (!isLooping || loopable.length === 0) return;
+
+        const cmd = loopable[currentLoopIndex];
+        console.log('[Lovense] Looping command', currentLoopIndex + 1, 'of', loopable.length, ':', cmd);
+
+        try {
+            await client.sendCommand(cmd);
+        } catch (e) {
+            console.warn('[Lovense] Loop command failed:', e);
+        }
+
+        // Re-check after async operation (loop may have been stopped)
+        if (!isLooping) return;
+
+        currentLoopIndex = (currentLoopIndex + 1) % loopable.length;
+        const durationMs = (cmd.duration || 5) * 1000;
+        loopInterval = setTimeout(playNext, durationMs);
+    };
+
+    playNext();
+}
+
+/**
+ * Stop the command loop and send a stop signal to all devices.
+ */
+function stopLoopingCommands() {
+    isLooping = false;
+    if (loopInterval) {
+        clearTimeout(loopInterval);
+        loopInterval = null;
+    }
+    currentLoopIndex = 0;
+
+    if (client) {
+        client.sendCommand({ action: 'Stop', strength: 0, duration: 0 })
+            .catch(e => console.warn('[Lovense] Stop on loop-clear failed:', e));
+    }
+    console.log('[Lovense] Stopped command loop');
+}
+
 async function updateToyCache() {
     if (!client) return;
     try {
         const toys = await client.getToys();
         if (toys && !toys.error) {
             cachedToys = toys;
+            updateLovensePrompt();
         }
     } catch (e) {
         console.warn("[Lovense] Could not update toy cache:", e);
@@ -44,63 +149,75 @@ async function updateToyCache() {
 }
 
 /**
- * Prompt Interceptor: Injects state awareness (toy list) and, 
- * if native tools are unsupported, provides formatting instructions for fallback.
+ * Generates dynamic instructions based on connected toys and capabilities
  */
-window.injectLovenseContext = async function(chat, contextSize, abort, type) {
-    if (!Array.isArray(chat) || chat.length === 0) return;
-    
-    // 1. Inject Toy State Awareness (Always)
+function generateDynamicPrompt() {
     const toyKeys = Object.keys(cachedToys);
-    if (toyKeys.length > 0) {
-        const toyDescriptions = toyKeys.map(id => {
-            const toy = cachedToys[id];
-            return `- ${toy.name || id} (ID: ${id}): Status: ${toy.status === "1" ? 'Connected' : 'Disconnected'}, Battery: ${toy.battery ?? '?'}% (Type: External Vibrator, placed on user's panties/clitoris)`;
-        }).join('\n');
+    if (toyKeys.length === 0) return '';
 
-        const stateNote = {
-            is_user: false,
-            name: "System Note (Lovense State)",
-            send_date: Date.now(),
-            mes: `[SYSTEM INFO: The user has the following physical Lovense device active and connected:\n${toyDescriptions}\nEnsure that any physical caressing, touch, or reactions in the narrative correspond realistically to this device.]`
-        };
-        chat.splice(chat.length - 1, 0, stateNote);
+    const capabilities = new Set(['vibrate']); // All toys can vibrate
+    const toyNames = [];
+    const toyDetails = [];
+
+    for (const id of toyKeys) {
+        const toy = cachedToys[id];
+        const toyName = (toy.name || '').toLowerCase();
+        const displayName = toy.name || id;
+        toyNames.push(displayName);
+
+        // Match device name to capabilities
+        const matchedKey = Object.keys(TOY_CAPABILITIES).find(k => toyName.includes(k));
+        const toyCaps = matchedKey ? TOY_CAPABILITIES[matchedKey] : ['vibrate'];
+            
+        toyDetails.push({ name: displayName, capabilities: toyCaps, id });
+        toyCaps.forEach(cap => capabilities.add(cap));
     }
 
-    // 2. Inject explicit instructions based on tool calling capability
-    if (isNativeSupported) {
-        const toolInstruction = {
-            is_user: false,
-            name: "System Note (Lovense Tool Instruction)",
-            send_date: Date.now(),
-            mes: `[LOVENSE SYSTEM INSTRUCTION: You have access to the tool 'control_lovense_toy' to control the user's active physical Lovense device (Ferri: external vibrator).
-Whenever there is physical contact, touch, caressing, or intimacy in the narrative, you MUST call 'control_lovense_toy'.
-Required parameters:
-- 'action': 'Vibrate' (or 'Stop')
-- 'strength': Integer from 1 to 20
-- 'duration': Integer from 1 to 20 seconds
-- 'toyId': 'mock-ferri-001'
+    const capabilityDescriptions = {
+        'vibrate': '• Vibrate (1-20): ALL devices',
+        'rotate': '• Rotate (1-20): Nora, Diamo, Ridge',
+        'pump': '• Pump (1-3): Max, Max 2',
+        'thrusting': '• Thrusting (1-20): Solace, Sex Machine, Gravity',
+        'fingering': '• Fingering (1-20): Flexer',
+        'suction': '• Suction (1-20): Tenera',
+        'oscillate': '• Oscillate (1-20): Osci series',
+    };
 
-Alternatively, you can trigger the device by adding a "lovense" key to the character object inside your JSON tracker block at the start of your response. Example format to add to your character tracker:
+    const capabilitiesText = Array.from(capabilities)
+        .map(cap => capabilityDescriptions[cap])
+        .filter(Boolean)
+        .join('\n');
+
+    let deviceSection = '';
+    if (toyDetails.length > 1) {
+        deviceSection = `\n\nDevice Targeting:\nControl specific devices by adding "toyId": "id" parameter. Devices:\n`;
+        for (const toy of toyDetails) {
+            deviceSection += `• ${toy.name} (ID: ${toy.id}): ${toy.capabilities.join(', ')}\n`;
+        }
+    }
+
+    const guidelines = settings.customGuidelines || defaultSettings.customGuidelines;
+    
+    // Format based on tool calling support
+    let instructionFormat = '';
+    if (isNativeSupported) {
+        instructionFormat = `You have access to the tool 'control_lovense_toy' to control the user's active physical Lovense device(s).
+Whenever there is physical contact, touch, caressing, or intimacy in the narrative, you MUST call 'control_lovense_toy'.
+
+Alternatively, you can trigger the device by adding a "lovense" key to the character object inside your JSON tracker block at the start of your response. Example format:
 "lovense": {
   "action": "Vibrate",
   "strength": 8, // Intensity (1-20)
   "duration": 12 // Duration in seconds (1-20)
-}
-If no physical stimulation is occurring in this turn, omit the "lovense" key from your tracker.]`
-        };
-        chat.splice(chat.length - 1, 0, toolInstruction);
+}`;
     } else {
-        const fallbackInstruction = {
-            is_user: false,
-            name: "System Note (Lovense Instructions)",
-            send_date: Date.now(),
-            mes: `[LOVENSE SYSTEM INSTRUCTION: If the current narrative, action, or intimacy warrants physical haptic feedback, you MUST trigger physical stimulation by adding a "lovense" key to the character object inside your JSON tracker block at the start of your response. Example format:
+        instructionFormat = `If the current narrative, action, or intimacy warrants physical haptic feedback, you MUST trigger physical stimulation by adding a "lovense" key to the character object inside your JSON tracker block at the start of your response. Example format:
 "lovense": {
   "action": "Vibrate",
   "strength": 8, // Intensity (1-20)
   "duration": 12 // Duration in seconds (1-20)
 }
+
 If you do not use the JSON tracker block, you MUST append a standalone Markdown JSON code block to the very end of your response:
 \`\`\`lovense
 {
@@ -109,11 +226,44 @@ If you do not use the JSON tracker block, you MUST append a standalone Markdown 
   "duration_sec": 5,
   "toyId": "mock-ferri-001"
 }
-\`\`\`]`
-        };
-        chat.splice(chat.length - 1, 0, fallbackInstruction);
+\`\`\``;
     }
-};
+
+    return `[LOVENSE SYSTEM INSTRUCTION: You can control the user's Lovense device during this conversation:
+Connected devices: ${toyNames.join(', ')}
+
+Capabilities:
+${capabilitiesText}${deviceSection}
+
+${instructionFormat}
+
+Guidelines:
+${guidelines}]`;
+}
+
+/**
+ * Update the prompt injection via setExtensionPrompt
+ */
+function updateLovensePrompt() {
+    if (!stContext || !settings) return;
+    
+    // If no toys or not enabled (assuming connection mode indicates enabled state)
+    if (Object.keys(cachedToys).length === 0) {
+        setExtensionPrompt(EXTENSION_PROMPT_TAG, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+        return;
+    }
+
+    const prompt = generateDynamicPrompt();
+    setExtensionPrompt(
+        EXTENSION_PROMPT_TAG,
+        prompt,
+        extension_prompt_types.IN_CHAT,
+        0,
+        false,
+        extension_prompt_roles.SYSTEM
+    );
+}
+
 
 function handleToolResponse(apiResponse, action, strength, duration) {
     if (apiResponse.code === 200 || apiResponse.result === true) {
@@ -237,7 +387,10 @@ function registerParserHook(lovenseClient) {
                 'Lovense Mock (Parser)',
             );
         }
-        
+
+        // Queue for looping after generation ends
+        messageCommands.push({ action, strength, duration, toyId });
+
         lovenseClient.sendCommand({
             action,
             strength,
@@ -302,6 +455,21 @@ function registerParserHook(lovenseClient) {
     eventSource.on(eventTypes.MESSAGE_RECEIVED, (chatIndex) => {
         processMessage(chatIndex);
     });
+
+    // Clear command queue when new generation starts
+    eventSource.on(eventTypes.GENERATION_STARTED, () => {
+        messageCommands = [];
+        console.log('[Lovense] Generation started - cleared command queue');
+    });
+
+    // Start looping when generation completes
+    eventSource.on(eventTypes.GENERATION_ENDED, () => {
+        console.log('[Lovense] Generation ended -', messageCommands.length, 'commands queued');
+        stopLoopingCommands();
+        if (messageCommands.length > 0) {
+            startLoopingCommands();
+        }
+    });
 }
 
 async function updateUI() {
@@ -351,6 +519,19 @@ async function updateUI() {
         saveSettingsDebounced();
     });
 
+    window.$('#lovense_customGuidelines').on('input', (e) => {
+        settings.customGuidelines = e.target.value;
+        updateLovensePrompt();
+        saveSettingsDebounced();
+    });
+
+    window.$('#lovense_reset_guidelines').on('click', () => {
+        settings.customGuidelines = defaultSettings.customGuidelines;
+        window.$('#lovense_customGuidelines').val(settings.customGuidelines);
+        updateLovensePrompt();
+        saveSettingsDebounced();
+    });
+
     window.$('#lovense_test_connection').on('click', async () => {
         console.warn('[Lovense UI] Test Connection clicked. Current mode:', settings.connectionMode);
         const statusEl = window.$('#lovense_connection_status');
@@ -368,6 +549,12 @@ async function updateUI() {
             statusEl.text('Status: Disconnected');
             window.toastr.error(`Connection failed: ${e.message}`);
         }
+    });
+
+    window.$('#lovense_stop_all').on('click', () => {
+        stopLoopingCommands();
+        messageCommands = [];
+        window.toastr.success('All toys stopped and loop cleared.', 'Lovense');
     });
 
     toggleSettingsVisibility();
@@ -404,11 +591,12 @@ function registerLovenseSlashCommands() {
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'lovense-stop',
-        description: 'Stop all Lovense toys',
+        description: 'Stop all Lovense toys and clear command loop',
         callback: async () => {
             try {
-                await client.sendCommand({ action: 'Stop', strength: 0, duration: 0 });
-                return 'Lovense: All toys stopped.';
+                stopLoopingCommands();
+                messageCommands = [];
+                return 'Lovense: All toys stopped and loop cleared.';
             } catch (e) {
                 return `Lovense Error: ${e.message}`;
             }
@@ -455,6 +643,9 @@ function registerLovenseTools() {
                 : Math.min(Math.max(strength, 0), 20);
             
             let finalDuration = duration === 0 ? 60 : Math.min(Math.max(duration, 1), 60);
+
+            // Queue for looping after generation ends
+            messageCommands.push({ action, strength: sanitizedStrength, duration: finalDuration, toyId });
 
             if (isMock) {
                 console.log(`[Lovense Mock Tool] action=${action}, strength=${sanitizedStrength}, duration=${finalDuration}s, toyId=${toyId || 'all'}`);
@@ -510,6 +701,7 @@ export async function onActivate() {
         registerParserHook(client);
 
         await updateToyCache();
+        updateLovensePrompt(); // Initial prompt injection
         if (!isMock) {
             setInterval(updateToyCache, 30000);
         }

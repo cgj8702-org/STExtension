@@ -10,22 +10,26 @@
                     <span data-i18n="Connection Mode">Connection Mode</span>
                 </label>
                 <select id="lovense_connectionMode">
-                    <option value="local" {{#if (eq connectionMode 'local')}}selected{{/if}}>Local PC/Mac Connect</option>
-                    <option value="server" {{#if (eq connectionMode 'server')}}selected{{/if}}>Server Cloud API</option>
-                    <option value="mock" {{#if (eq connectionMode 'mock')}}selected{{/if}}>Mock (Testing)</option>
+                    <option value="local" {{#if (eq connectionMode 'local' )}}selected{{/if}}>Local PC/Mac Connect
+                    </option>
+                    <option value="server" {{#if (eq connectionMode 'server' )}}selected{{/if}}>Server Cloud API
+                    </option>
+                    <option value="mock" {{#if (eq connectionMode 'mock' )}}selected{{/if}}>Mock (Testing)</option>
                 </select>
             </div>
 
-            <div id="lovense_local_settings" class="settings-group {{#unless (eq connectionMode 'local')}}hidden{{/unless}}">
+            <div id="lovense_local_settings"
+                class="settings-group {{#unless (eq connectionMode 'local')}}hidden{{/unless}}">
                 <label for="lovense_localPort">
                     <span data-i18n="Local Port">Local Port</span>
                 </label>
                 <input id="lovense_localPort" type="text" value="{{localPort}}" />
-                
+
                 <label for="lovense_localDomain">
                     <span data-i18n="Local Domain">Local Domain</span>
                 </label>
-                <input id="lovense_localDomain" type="text" value="{{localDomain}}" placeholder="127-0-0-1.lovense.club" />
+                <input id="lovense_localDomain" type="text" value="{{localDomain}}"
+                    placeholder="127-0-0-1.lovense.club" />
             </div>
 
             <div id="lovense_server_settings" class="settings-group {{#if (eq connectionMode 'local')}}hidden{{/if}}">
@@ -33,28 +37,48 @@
                     <span data-i18n="Developer Token">Developer Token</span>
                 </label>
                 <input id="lovense_developerToken" type="password" value="{{developerToken}}" />
-                
+
                 <label for="lovense_userId">
                     <span data-i18n="User ID">User ID</span>
                 </label>
                 <input id="lovense_userId" type="text" value="{{userId}}" />
-                
+
                 <div class="security-warning">
-                    <small><i>Warning: Your Lovense Developer Token is saved in plain text. For local security, consider using Local PC/Mac Connect mode.</i></small>
+                    <small><i>Warning: Your Lovense Developer Token is saved in plain text. For local security, consider
+                            using Local PC/Mac Connect mode.</i></small>
                 </div>
             </div>
 
-            <div id="lovense_mock_settings" class="settings-group {{#unless (eq connectionMode 'mock')}}hidden{{/unless}}">
+            <div id="lovense_mock_settings"
+                class="settings-group {{#unless (eq connectionMode 'mock')}}hidden{{/unless}}">
                 <div class="mock-info-banner">
                     <strong>Mock Mode Active</strong>
-                    <p>Two simulated toys (Lush 3, Hush 2) are loaded. No real API calls are made.</p>
-                    <p><small>Commands are logged to the browser console (F12) and shown as toast notifications.</small></p>
+                    <p>A simulated toy is loaded. No real API calls are made.</p>
+                    <p><small>Commands are logged to the browser console (F12) and shown as toast notifications.</small>
+                    </p>
                 </div>
+            </div>
+
+            <div class="settings-group" style="margin-top: 10px;">
+                <label for="lovense_customGuidelines">
+                    <span data-i18n="AI Guidelines">AI Guidelines</span>
+                </label>
+                <textarea id="lovense_customGuidelines" rows="4" style="width: 100%; resize: vertical; margin-top: 5px; padding: 8px; border-radius: 4px;" placeholder="Enter guidelines for the AI...">{{customGuidelines}}</textarea>
+                <small style="display: block; margin-top: 4px; opacity: 0.8;">These instructions are injected into the system prompt. Changes apply automatically.</small>
+                
+                <button id="lovense_reset_guidelines" class="menu_button" style="margin-top: 8px; font-size: 0.9em; padding: 4px 8px;">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    <span>Reset to Default Guidelines</span>
+                </button>
             </div>
 
             <div class="settings-group">
                 <button id="lovense_test_connection" class="menu_button">
                     <span data-i18n="Test Connection">Test Connection</span>
+                </button>
+                <button id="lovense_stop_all" class="menu_button" style="background-color: #d9534f; border-color: #d43f3a; margin-top: 5px;">
+                    <i class="fa-solid fa-stop"></i>
+                    <span>Stop All & Clear Loop</span>
                 </button>
                 <div id="lovense_connection_status" class="status-indicator">
                     <span data-i18n="Status: Disconnected">Status: Disconnected</span>
