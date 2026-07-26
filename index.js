@@ -48,10 +48,6 @@ Call 'control_lovense_toy' with parameters: action ('Vibrate', 'Pulse', 'Wave', 
   - 'Stop': Immediately halt all device activity.
     (Fallback: If tool calls are unsupported, include "lovense": {"action": "Vibrate", "strength": X, "duration": Y} in your JSON tracker).
 
-    CRITICAL FOR REASONING MODELS:
-    - Use the reasoning block ONLY for internal planning and analysis.
-    - The final response to the user (dialogue, narrative, and text messages) MUST be placed in the 'content' field.
-    - NEVER place the final output intended for the user inside the reasoning block.
 `,
 });
 
