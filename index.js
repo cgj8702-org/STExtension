@@ -1,9 +1,9 @@
 // @ts-nocheck
 import { LovenseClient } from './lovense-client.js?v=11';
-import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
-import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
-import { SlashCommandArgument, ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
-import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
+import { SlashCommandParser } from '/scripts/slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '/scripts/slash-commands/SlashCommand.js';
+import { SlashCommandArgument, ARGUMENT_TYPE } from '/scripts/slash-commands/SlashCommandArgument.js';
+import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '/scripts/script.js';
 
 const MODULE_NAME = 'lovense_integration';
 const EXTENSION_PROMPT_TAG = 'lovense_control';
@@ -223,8 +223,10 @@ ${guidelines}]`;
 function updateLovensePrompt() {
     if (!stContext || !settings) return;
 
-    // If no toys or not enabled (assuming connection mode indicates enabled state)
-    if (Object.keys(cachedToys).length === 0) {
+    const isLocalMode = settings.connectionMode === 'local';
+
+    // In local mode, skip if no toys are connected. In server/mock mode, proceed anyway.
+    if (isLocalMode && Object.keys(cachedToys).length === 0) {
         setExtensionPrompt(EXTENSION_PROMPT_TAG, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
         return;
     }
@@ -281,9 +283,9 @@ function parseAttributes(attrString) {
  * Fallback Path: Parser hook to catch, execute, and remove Markdown-JSON blocks or manual XML tags.
  */
 function registerParserHook(lovenseClient) {
-    const { eventSource, eventTypes } = stContext;
-    if (!eventSource || !eventTypes) {
-        console.error("[Lovense] eventSource or eventTypes not found in context.");
+    const { eventSource, event_types } = stContext;
+    if (!eventSource || !event_types) {
+        console.error("[Lovense] eventSource or event_types not found in context.");
         return;
     }
 
@@ -411,22 +413,22 @@ function registerParserHook(lovenseClient) {
     }
 
     // Register listeners for rendered and received bot messages
-    eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, (chatIndex) => {
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (chatIndex) => {
         processMessage(chatIndex);
     });
 
-    eventSource.on(eventTypes.MESSAGE_RECEIVED, (chatIndex) => {
+    eventSource.on(event_types.MESSAGE_RECEIVED, (chatIndex) => {
         processMessage(chatIndex);
     });
 
     // Clear command queue when new generation starts
-    eventSource.on(eventTypes.GENERATION_STARTED, () => {
+    eventSource.on(event_types.GENERATION_STARTED, () => {
         messageCommands = [];
         console.log('[Lovense] Generation started - cleared command queue');
     });
 
     // Start looping when generation completes
-    eventSource.on(eventTypes.GENERATION_ENDED, () => {
+    eventSource.on(event_types.GENERATION_ENDED, () => {
         console.log('[Lovense] Generation ended -', messageCommands.length, 'commands queued');
         stopLoopingCommands();
         if (messageCommands.length > 0) {
@@ -437,11 +439,12 @@ function registerParserHook(lovenseClient) {
 
 async function updateUI() {
     const { renderExtensionTemplateAsync, saveSettingsDebounced } = stContext;
-    const settingsHtml = await renderExtensionTemplateAsync(
-        'third-party/STExtension',
-        'settings',
-        settings
-    );
+    let settingsHtml;
+    try {
+        settingsHtml = await renderExtensionTemplateAsync('third-party/STExtension', 'settings', settings);
+    } catch (e) {
+        settingsHtml = await renderExtensionTemplateAsync('third-party/lovense-integration', 'settings', settings);
+    }
 
     const container = window.$('#extensions_settings2');
     if (container.length === 0) {
