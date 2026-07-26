@@ -635,7 +635,7 @@ function registerLovenseTools() {
             const prefix = isMock ? '[Lovense Mock]' : '[Lovense]';
             return `${prefix} Sending ${action} (Lvl ${strength})...`;
         },
-        stealth: false
+        stealth: true
     });
 }
 
