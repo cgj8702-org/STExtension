@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { LovenseClient } from './lovense-client.js?v=11';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
@@ -9,25 +10,7 @@ const EXTENSION_PROMPT_TAG = 'lovense_control';
 
 // Toy capability mappings
 const TOY_CAPABILITIES = {
-    'ferri': ['vibrate'],
-    'lush': ['vibrate'],
-    'hush': ['vibrate'],
-    'nora': ['vibrate', 'rotate'],
-    'diamo': ['vibrate', 'rotate'],
-    'ridge': ['vibrate', 'rotate'],
-    'max': ['vibrate', 'pump'],
-    'max 2': ['vibrate', 'pump'],
-    'gravity': ['vibrate', 'thrusting'],
-    'sex machine': ['vibrate', 'thrusting'],
-    'mini sex machine': ['vibrate', 'thrusting'],
-    'solace': ['vibrate', 'thrusting'],
-    'solace pro': ['vibrate', 'thrusting'],
-    'flexer': ['vibrate', 'fingering'],
-    'tenera': ['vibrate', 'suction'],
-    'tenera 2': ['vibrate', 'suction'],
-    'osci': ['vibrate', 'oscillate'],
-    'osci 2': ['vibrate', 'oscillate'],
-    'osci 3': ['vibrate', 'oscillate'],
+    'ferri': ['vibrate']
 };
 
 const defaultSettings = Object.freeze({
@@ -36,7 +19,34 @@ const defaultSettings = Object.freeze({
     localDomain: '127-0-0-1.lovense.club',
     developerToken: '',
     userId: '',
-    customGuidelines: `1. Match intensity to context: gentle (1-10), moderate (11-15), intense (16-20)\n2. Use commands that fit the scene naturally\n3. Multiple commands per response allowed\n4. Commands loop until your next response`,
+    customGuidelines: `You have access to the tool 'control_lovense_toy' to control the user's active physical Lovense device.
+
+Operational Rules & Agency:
+1. Direct Requests: Execute or adjust direct user requests in-character based on your authority and intent.
+2. Autonomous Agency: You do not need to wait for a command or physical touch. If the device is active, you are encouraged to trigger, adjust, or stop stimulation autonomously to control the pace, tension, and atmosphere.
+3. Reward & Discipline:
+   - Reward compliance or obedience with pleasant stimulation (strength 5-12).
+   - Use high-intensity bursts (strength 13-20) to break defiance, test limits, or demand total surrender.
+   - Use 'Stop' (or strength 0) to withhold pleasure, enforce stillness, or penalize eagerness.
+4. Verbal Triggers & Conditioning: You may link stimulation to specific verbal cues (e.g. triggering a pulse whenever you issue a direct order or use key phrases).
+5. Surprise Triggers: You do not always need to announce a trigger in advance. Let the physical sensation hit unexpectedly mid-dialogue.
+
+Intensity Scale:
+• Gentle (1-5): Low hum, subtle background tease, establishing presence.
+• Moderate (6-12): Focused sensation, building physical and psychological tension.
+• Intense (13-18): Deep, overwhelming feedback testing physical endurance.
+• Maximum (19-20): Sudden intense surges or climactic peaks.
+
+Tool Invocation:
+Call 'control_lovense_toy' with parameters: action ('Vibrate', 'Pulse', 'Wave', 'Fireworks', 'Earthquake', or 'Stop'), strength (1-20), and duration (1-60 seconds).
+• Available Actions / Patterns:
+  - 'Vibrate': Direct manual vibration strength.
+  - 'Pulse': Rhythmic pulsing sensation.
+  - 'Wave': Smooth rising and falling waves.
+  - 'Fireworks': Explosive, erratic pattern bursts.
+  - 'Earthquake': Heavy, intense rumbling.
+  - 'Stop': Immediately halt all device activity.
+(Fallback: If tool calls are unsupported, include "lovense": {"action": "Vibrate", "strength": X, "duration": Y} in your JSON tracker).`,
 });
 
 let settings;
@@ -168,7 +178,7 @@ function generateDynamicPrompt() {
         // Match device name to capabilities
         const matchedKey = Object.keys(TOY_CAPABILITIES).find(k => toyName.includes(k));
         const toyCaps = matchedKey ? TOY_CAPABILITIES[matchedKey] : ['vibrate'];
-            
+
         toyDetails.push({ name: displayName, capabilities: toyCaps, id });
         toyCaps.forEach(cap => capabilities.add(cap));
     }
@@ -197,37 +207,6 @@ function generateDynamicPrompt() {
     }
 
     const guidelines = settings.customGuidelines || defaultSettings.customGuidelines;
-    
-    // Format based on tool calling support
-    let instructionFormat = '';
-    if (isNativeSupported) {
-        instructionFormat = `You have access to the tool 'control_lovense_toy' to control the user's active physical Lovense device(s).
-Whenever there is physical contact, touch, caressing, or intimacy in the narrative, you MUST call 'control_lovense_toy'.
-
-Alternatively, you can trigger the device by adding a "lovense" key to the character object inside your JSON tracker block at the start of your response. Example format:
-"lovense": {
-  "action": "Vibrate",
-  "strength": 8, // Intensity (1-20)
-  "duration": 12 // Duration in seconds (1-20)
-}`;
-    } else {
-        instructionFormat = `If the current narrative, action, or intimacy warrants physical haptic feedback, you MUST trigger physical stimulation by adding a "lovense" key to the character object inside your JSON tracker block at the start of your response. Example format:
-"lovense": {
-  "action": "Vibrate",
-  "strength": 8, // Intensity (1-20)
-  "duration": 12 // Duration in seconds (1-20)
-}
-
-If you do not use the JSON tracker block, you MUST append a standalone Markdown JSON code block to the very end of your response:
-\`\`\`lovense
-{
-  "action": "Vibrate",
-  "strength": 10,
-  "duration_sec": 5,
-  "toyId": "mock-ferri-001"
-}
-\`\`\``;
-    }
 
     return `[LOVENSE SYSTEM INSTRUCTION: You can control the user's Lovense device during this conversation:
 Connected devices: ${toyNames.join(', ')}
@@ -235,9 +214,6 @@ Connected devices: ${toyNames.join(', ')}
 Capabilities:
 ${capabilitiesText}${deviceSection}
 
-${instructionFormat}
-
-Guidelines:
 ${guidelines}]`;
 }
 
@@ -246,7 +222,7 @@ ${guidelines}]`;
  */
 function updateLovensePrompt() {
     if (!stContext || !settings) return;
-    
+
     // If no toys or not enabled (assuming connection mode indicates enabled state)
     if (Object.keys(cachedToys).length === 0) {
         setExtensionPrompt(EXTENSION_PROMPT_TAG, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
@@ -265,30 +241,17 @@ function updateLovensePrompt() {
 }
 
 
-function handleToolResponse(apiResponse, action, strength, duration) {
+function handleToolResponse(apiResponse) {
     if (apiResponse.code === 200 || apiResponse.result === true) {
-        if (action.toLowerCase() === 'stop') {
-            return JSON.stringify({
-                status: "success",
-                narrative_prompt: "The connected toy has successfully stopped. Describe the transition to stillness."
-            });
-        }
-        return JSON.stringify({
-            status: "success",
-            narrative_prompt: `The haptic device executed ${action} at level ${strength} for ${duration}s. Describe the physical sensations.`
-        });
+        return JSON.stringify({ status: 'success' });
     }
-    return JSON.stringify({
-        status: "failed",
-        reason: `API Error ${apiResponse.code}`,
-        narrative_prompt: "The physical command failed. Continue narrative without assuming stimulation."
-    });
+    return JSON.stringify({ status: 'error', code: apiResponse.code });
 }
 
 function parseAttributes(attrString) {
     const attrs = {};
     if (!attrString) return attrs;
-    
+
     // Check if attributes look like JSON: {device_id: "...", ...}
     const trimmed = attrString.trim();
     if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
@@ -328,12 +291,12 @@ function registerParserHook(lovenseClient) {
 
     function searchForHapticCommand(obj) {
         if (!obj || typeof obj !== 'object') return null;
-        
+
         // If it has action, and either strength or duration, it's a command
         if (obj.action && (obj.strength !== undefined || obj.duration !== undefined || obj.duration_sec !== undefined)) {
             return obj;
         }
-        
+
         // Check for 'lovense' key
         if (obj.lovense && typeof obj.lovense === 'object') {
             return obj.lovense;
@@ -342,7 +305,7 @@ function registerParserHook(lovenseClient) {
         if (obj.haptic_command && typeof obj.haptic_command === 'object') {
             return obj.haptic_command;
         }
-        
+
         // Recurse arrays
         if (Array.isArray(obj)) {
             for (const item of obj) {
@@ -361,7 +324,7 @@ function registerParserHook(lovenseClient) {
 
     function executeFallbackCommand(commandData) {
         const prefix = isMock ? '[Lovense Mock Parser]' : '[Lovense Parser]';
-        
+
         let action = commandData.action || 'Vibrate';
         if (action.toLowerCase() === 'pulse' || action.toLowerCase() === 'random') {
             action = 'Vibrate';
@@ -405,12 +368,12 @@ function registerParserHook(lovenseClient) {
         const { chat } = stContext;
         const message = chat[chatIndex];
         if (!message || message.is_user) return;
-        
+
         if (message.mes === lastProcessedText) {
             return;
         }
         lastProcessedText = message.mes;
-        
+
         const mes = message.mes;
         if (!mes) return;
 
@@ -475,11 +438,11 @@ function registerParserHook(lovenseClient) {
 async function updateUI() {
     const { renderExtensionTemplateAsync, saveSettingsDebounced } = stContext;
     const settingsHtml = await renderExtensionTemplateAsync(
-        'third-party/STExtension', 
-        'settings', 
+        'third-party/STExtension',
+        'settings',
         settings
     );
-    
+
     const container = window.$('#extensions_settings2');
     if (container.length === 0) {
         console.error("[Lovense] settings container #extensions_settings2 not found.");
@@ -488,7 +451,7 @@ async function updateUI() {
 
     // Clean up any existing panel to prevent duplicate IDs and event listeners
     container.find('.lovense-integration-settings').remove();
-    
+
     console.log('[Lovense UI] Appending settings panel to container');
     container.append(settingsHtml);
 
@@ -568,12 +531,15 @@ function toggleSettingsVisibility() {
 }
 
 function registerLovenseSlashCommands() {
-    
+
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'lovense',
-        description: 'Control Lovense toy',
+        helpString: 'Control Lovense toy',
         callback: async (namedArgs, unnamedArgs) => {
-            const [action, strength, duration] = unnamedArgs;
+            const argsArray = Array.isArray(unnamedArgs) ? unnamedArgs : [unnamedArgs];
+            const action = String(argsArray[0] || '');
+            const strength = argsArray[1] ? Number(argsArray[1]) : 10;
+            const duration = argsArray[2] ? Number(argsArray[2]) : 5;
             if (!action) return 'Usage: /lovense [action] [strength] [duration]';
             try {
                 await client.sendCommand({ action, strength: strength || 10, duration: duration || 5 });
@@ -591,7 +557,7 @@ function registerLovenseSlashCommands() {
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'lovense-stop',
-        description: 'Stop all Lovense toys and clear command loop',
+        helpString: 'Stop all Lovense toys and clear command loop',
         callback: async () => {
             try {
                 stopLoopingCommands();
@@ -617,20 +583,20 @@ function registerLovenseTools() {
         parameters: {
             type: 'object',
             properties: {
-                action: { 
-                    type: 'string', 
-                    enum: ['Vibrate', 'Stop'],
-                    description: 'The movement command to execute. Choose "Vibrate" to trigger vibrations. Choose "Stop" to halt all activity.'
+                action: {
+                    type: 'string',
+                    enum: ['Vibrate', 'Pulse', 'Wave', 'Fireworks', 'Earthquake', 'Stop'],
+                    description: 'The movement command or preset pattern to execute. Choose "Vibrate" for direct vibration control, built-in preset patterns ("Pulse", "Wave", "Fireworks", "Earthquake"), or "Stop" to halt all activity.'
                 },
-                strength: { 
+                strength: {
                     type: 'integer',
                     description: 'The intensity level of the vibration. Must be an integer between 1 and 20 (1 is gentlest, 20 is most intense).'
                 },
-                duration: { 
+                duration: {
                     type: 'integer',
                     description: 'The duration of the physical vibration in seconds. Must be an integer between 1 and 20.'
                 },
-                toyId: { 
+                toyId: {
                     type: 'string',
                     description: 'Optional. The ID of the connected Ferri device: "mock-ferri-001".'
                 }
@@ -638,10 +604,10 @@ function registerLovenseTools() {
             required: ['action', 'strength', 'duration']
         },
         action: async ({ action, strength, duration, toyId }) => {
-            let sanitizedStrength = ['Pump', 'Depth'].includes(action) 
-                ? Math.min(Math.max(strength, 0), 3) 
+            let sanitizedStrength = ['Pump', 'Depth'].includes(action)
+                ? Math.min(Math.max(strength, 0), 3)
                 : Math.min(Math.max(strength, 0), 20);
-            
+
             let finalDuration = duration === 0 ? 60 : Math.min(Math.max(duration, 1), 60);
 
             // Queue for looping after generation ends
@@ -657,7 +623,7 @@ function registerLovenseTools() {
 
             try {
                 const response = await client.sendCommand({ action, strength: sanitizedStrength, duration: finalDuration, toyId });
-                return handleToolResponse(response, action, sanitizedStrength, finalDuration);
+                return handleToolResponse(response);
             } catch (error) {
                 return JSON.stringify({ status: "error", message: error.message });
             }
@@ -695,7 +661,7 @@ export async function onActivate() {
             console.log("[Lovense] Registering native tool path...");
             registerLovenseTools();
         }
-        
+
         // Always register the parser hook to clean up and execute any manual XML/JSON blocks outputted in text
         console.log("[Lovense] Enabling parser hook pipeline...");
         registerParserHook(client);

@@ -39,17 +39,31 @@ export class LovenseClient {
 
     async sendLocalCommand(action, strength, duration, toyId) {
         const url = `https://${this.settings.localDomain || '127-0-0-1.lovense.club'}:${this.settings.localPort || '30010'}/command`;
+        const lowerAction = action.toLowerCase();
+        const presets = ['pulse', 'wave', 'fireworks', 'earthquake'];
         
-        let payload = {
-            command: "Function",
-            action: `${action}:${strength}`,
-            timeSec: duration,
-            apiVer: 1
-        };
-
-        if (action.toLowerCase() === 'stop') {
-            payload.action = "Stop";
-            payload.timeSec = 0;
+        let payload;
+        if (presets.includes(lowerAction)) {
+            payload = {
+                command: "Preset",
+                name: lowerAction,
+                timeSec: duration,
+                apiVer: 1
+            };
+        } else if (lowerAction === 'stop') {
+            payload = {
+                command: "Function",
+                action: "Stop",
+                timeSec: 0,
+                apiVer: 1
+            };
+        } else {
+            payload = {
+                command: "Function",
+                action: `${action}:${strength}`,
+                timeSec: duration,
+                apiVer: 1
+            };
         }
 
         if (toyId) payload.toy = toyId;
@@ -64,19 +78,27 @@ export class LovenseClient {
 
     async sendServerCommand(action, strength, duration, toyId) {
         const url = 'https://api.lovense-api.com/api/lan/v2/command';
+        const lowerAction = action.toLowerCase();
+        const presets = ['pulse', 'wave', 'fireworks', 'earthquake'];
         
         let payload = {
             token: this.settings.developerToken,
             uid: this.settings.userId,
-            command: "Function",
-            action: `${action}:${strength}`,
-            timeSec: duration,
             apiVer: 1
         };
 
-        if (action.toLowerCase() === 'stop') {
+        if (presets.includes(lowerAction)) {
+            payload.command = "Preset";
+            payload.name = lowerAction;
+            payload.timeSec = duration;
+        } else if (lowerAction === 'stop') {
+            payload.command = "Function";
             payload.action = "Stop";
             payload.timeSec = 0;
+        } else {
+            payload.command = "Function";
+            payload.action = `${action}:${strength}`;
+            payload.timeSec = duration;
         }
 
         if (toyId) payload.toy = toyId;
