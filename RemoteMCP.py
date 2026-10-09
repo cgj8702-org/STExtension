@@ -84,15 +84,16 @@ def _require_client():
 
 
 @mcp.tool()
-def control_lovense_toy(action: str = "Vibrate", strength: int = 2, duration: int = 5, toy_id: str = "", delay: int = 0) -> dict:
-    """Control the user's Lovense toy. Mirrors the SillyTavern 'control_lovense_toy' tool.
+def control_lovense_toy(action: str = "Vibrate", strength: int = 1, duration: int = 5, toy_id: str = "", loop: bool = False, delay: int = 0) -> dict:
+    """Control the user's Lovense Ferri. Mirrors the SillyTavern 'control_lovense_toy' tool.
 
     Args:
         action: Vibrate, Rotate, Pump, Thrusting, Fingering, Suction, Oscillate,
             Pulse, Wave, Fireworks, Earthquake, or Stop. 'random' maps to Vibrate.
-        strength: Ferri 0-3 ONLY (0=stop, 1=gentle, 2=moderate, 3=MAX — even 4 is too much). Clamped.
+        strength: Ferri 0-3 ONLY (0=stop, 1=gentle default, 2=moderate, 3=MAX — even 4 is too much). Clamped.
         duration: seconds 1-60. 0 means hold -> 60s.
         toy_id: optional toy ID (omit for all toys).
+        loop: fire-once by default; true replays until Stop (use sparingly).
         delay: optional seconds 0-300 to wait before firing (haptic landmine).
     """
     try:

@@ -19,27 +19,21 @@ const defaultSettings = Object.freeze({
     localDomain: '127-0-0-1.lovense.club',
     developerToken: '',
     userId: '',
-    customGuidelines: `You have access to the tool 'control_lovense_toy' to control the user's active physical Lovense device.
+    customGuidelines: `You have access to the tool 'control_lovense_toy' to control the user's physical Lovense Ferri device.
 
-SAFETY LIMIT (HARD CAP): The connected Ferri is extremely sensitive. NEVER exceed strength 3. Strength 0 = stop, 1 = gentle tease, 2 = moderate, 3 = MAXIMUM. Even 4 is physically too much. If a scene calls for "intense" or "maximum", use strength 3 with a longer duration instead. Always clamp any requested strength above 3 down to 3.
+SAFETY LIMIT (HARD CAP): NEVER exceed strength 3. 0 = stop, 1 = gentle tease, 2 = moderate, 3 = MAXIMUM. Even 4 is physically too much. If a scene calls for "intense", use strength 3 with a longer duration instead.
 
-Operational Rules & Agency:
-1. Direct Requests: Execute or adjust direct user requests in-character based on your authority and intent (still capped at 3).
-2. Autonomous Agency: You do not need to wait for a command or physical touch. If the device is active, you are encouraged to trigger, adjust, or stop stimulation autonomously to control the pace, tension, and atmosphere.
-3. Reward & Discipline:
-   - Reward compliance or obedience with pleasant stimulation (strength 1-2).
-   - Use strength 3 bursts to break defiance, test limits, or demand total surrender. NEVER go above 3.
-   - Use 'Stop' (or strength 0) to withhold pleasure, enforce stillness, or penalize eagerness.
-4. Verbal Triggers & Conditioning: You may link stimulation to specific verbal cues (e.g. triggering a pulse whenever you issue a direct order or use key phrases).
-5. Surprise Triggers: You do not always need to announce a trigger in advance. Let the physical sensation hit unexpectedly mid-dialogue.
+TAME AGENCY — how to behave:
+1. You MAY trigger the device on your own during roleplay when it fits the scene — but keep it gentle by default: prefer strength 1, short durations (3-10s), and common patterns (Vibrate, Pulse, Wave).
+2. Strength 2-3 is reserved for explicit escalation: the user asked for more, consented to intensity, or the scene clearly peaks. Never open with 3.
+3. No surprise max blasts. No chaining long loops without the user's buy-in. One command plays once and stops — if you want it to repeat, pass loop=true explicitly.
+4. Stop immediately when the user says stop (any wording: "stop", "too much", "pause", "scene change", safeword) — call action Stop and do not restart until asked.
+5. Direct user commands (/lovense or in-chat requests) always win over your own pacing. Execute them as asked (still capped at 3).
 
-Intensity Scale (Ferri-calibrated, HARD MAX 3):
-• Gentle (1): Low hum, subtle background tease, establishing presence.
-• Moderate (2): Focused sensation, building physical and psychological tension.
-• Maximum (3): ABSOLUTE CEILING. Overwhelming for this device. Never exceed.
+Looping: each command fires ONCE by default. Only set loop=true if the user asked for continuous/repeating stimulation or the scene explicitly needs it (e.g. "keep it going", "don't stop"). Looping replays until Stop — use sparingly.
 
 Tool Invocation:
-Call 'control_lovense_toy' with parameters: action ('Vibrate', 'Pulse', 'Wave', 'Fireworks', 'Earthquake', or 'Stop'), strength (0-3, NEVER above 3), and duration (1-60 seconds).
+Call 'control_lovense_toy' with: action ('Vibrate', 'Pulse', 'Wave', 'Fireworks', 'Earthquake', or 'Stop'), strength (0-3, default 1), duration (1-60 seconds, default 5), loop (false by default, true only when continuous play was requested).
 • Available Actions / Patterns:
   - 'Vibrate': Direct manual vibration strength.
   - 'Pulse': Rhythmic pulsing sensation.
@@ -58,7 +52,9 @@ let cachedToys = {};
 let stContext = null;
 let isNativeSupported = false;
 
-// Command looping state
+// Command playback state.
+// B+C behavior: every command fires ONCE by default. Only commands with
+// loop=true are replayed after generation ends, until Stop.
 let messageCommands = [];
 let loopInterval = null;
 let currentLoopIndex = 0;
@@ -78,8 +74,9 @@ function getSettings() {
 }
 
 /**
- * Start looping collected commands from the current message.
- * Commands play sequentially, each for its own duration, cycling infinitely.
+ * Start looping ONLY commands explicitly flagged loop=true.
+ * Fire-once (C): non-loop commands already played immediately at call time,
+ * so this replays just the loopable subset, cycling until Stop.
  */
 function startLoopingCommands() {
     if (loopInterval) {
@@ -91,9 +88,9 @@ function startLoopingCommands() {
         return;
     }
 
-    // Filter out stop commands and clone for safe mutation
+    // Only explicit opt-in loops. Filter out stop commands and clone.
     const loopable = messageCommands
-        .filter(cmd => cmd.action?.toLowerCase() !== 'stop')
+        .filter(cmd => cmd.loop === true && cmd.action?.toLowerCase() !== 'stop')
         .map(cmd => {
             const clone = { ...cmd };
             // Normalize zero-duration to 30s for sequential playback
@@ -101,7 +98,10 @@ function startLoopingCommands() {
             return clone;
         });
 
-    if (loopable.length === 0) return;
+    if (loopable.length === 0) {
+        console.log('[Lovense] No loop=true commands — nothing to replay (fire-once done).');
+        return;
+    }
 
     console.log('[Lovense] Starting command loop with', loopable.length, 'commands');
     currentLoopIndex = 0;
@@ -131,7 +131,8 @@ function startLoopingCommands() {
 }
 
 /**
- * Stop the command loop and send a stop signal to all devices.
+ * Stop playback and send a stop signal to all devices.
+ * Also called defensively on GENERATION_ENDED before any loop=true replay.
  */
 function stopLoopingCommands() {
     isLooping = false;
@@ -350,18 +351,20 @@ function registerParserHook(lovenseClient) {
         duration = Math.min(Math.max(duration, 1), 60);
 
         const toyId = commandData.toyId || commandData.device_id || 'mock-ferri-001';
+        const loop = commandData.loop === true || commandData.loop === 'true';
 
-        console.warn(`${prefix} Executing: action=${action}, strength=${strength}, duration=${duration}s, toyId=${toyId}`);
+        console.warn(`${prefix} Executing: action=${action}, strength=${strength}, duration=${duration}s, toyId=${toyId}, loop=${loop}`);
 
         if (isMock) {
             window.toastr.info(
-                `${action} @ Lvl ${strength} for ${duration}s`,
+                `${action} @ Lvl ${strength} for ${duration}s${loop ? ' (loop)' : ''}`,
                 'Lovense Mock (Parser)',
             );
         }
 
-        // Queue for looping after generation ends
-        messageCommands.push({ action, strength, duration, toyId });
+        // Track for post-generation replay ONLY if loop=true (B). Fire-once (C)
+        // already executes immediately below — no replay needed otherwise.
+        messageCommands.push({ action, strength, duration, toyId, loop });
 
         lovenseClient.sendCommand({
             action,
@@ -434,11 +437,12 @@ function registerParserHook(lovenseClient) {
         console.log('[Lovense] Generation started - cleared command queue');
     });
 
-    // Start looping when generation completes
+    // Start looping when generation completes — only if loop=true commands exist
     eventSource.on(event_types.GENERATION_ENDED, () => {
-        console.log('[Lovense] Generation ended -', messageCommands.length, 'commands queued');
+        const loopCount = messageCommands.filter(c => c.loop === true).length;
+        console.log('[Lovense] Generation ended -', messageCommands.length, 'commands seen,', loopCount, 'loop=true');
         stopLoopingCommands();
-        if (messageCommands.length > 0) {
+        if (loopCount > 0) {
             startLoopingCommands();
         }
     });
@@ -544,25 +548,32 @@ function registerLovenseSlashCommands() {
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'lovense',
-        helpString: 'Control Lovense toy',
+        helpString: 'Control Lovense toy (fire-once; add loop=true to repeat until stopped)',
         callback: async (namedArgs, unnamedArgs) => {
             const argsArray = Array.isArray(unnamedArgs) ? unnamedArgs : [unnamedArgs];
             const action = String(argsArray[0] || '');
-            // Ferri safety: default 2, HARD CAP 3.
-            const strength = Math.min(Math.max(argsArray[1] ? Number(argsArray[1]) : 2, 0), 3);
+            // Ferri safety: default 1 (tame), HARD CAP 3.
+            const strength = Math.min(Math.max(argsArray[1] ? Number(argsArray[1]) : 1, 0), 3);
             const duration = argsArray[2] ? Number(argsArray[2]) : 5;
-            if (!action) return 'Usage: /lovense [action] [strength] [duration]';
+            const loop = String(argsArray[3] || '').toLowerCase() === 'true';
+            if (!action) return 'Usage: /lovense [action] [strength 0-3] [duration] [loop=true]';
             try {
                 await client.sendCommand({ action, strength, duration: duration || 5 });
-                return `Lovense: ${action} @ ${strength} triggered.`;
+                if (loop && action.toLowerCase() !== 'stop') {
+                    messageCommands.push({ action, strength, duration: duration || 5, toyId: null, loop: true });
+                    startLoopingCommands();
+                    return `Lovense: ${action} @ ${strength} looping until /lovense-stop.`;
+                }
+                return `Lovense: ${action} @ ${strength} triggered (once).`;
             } catch (e) {
                 return `Lovense Error: ${e.message}`;
             }
         },
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({ description: 'Action', typeList: ARGUMENT_TYPE.STRING, isRequired: true }),
-            SlashCommandArgument.fromProps({ description: 'Strength', typeList: ARGUMENT_TYPE.NUMBER }),
-            SlashCommandArgument.fromProps({ description: 'Duration', typeList: ARGUMENT_TYPE.NUMBER }),
+            SlashCommandArgument.fromProps({ description: 'Strength 0-3', typeList: ARGUMENT_TYPE.NUMBER }),
+            SlashCommandArgument.fromProps({ description: 'Duration seconds', typeList: ARGUMENT_TYPE.NUMBER }),
+            SlashCommandArgument.fromProps({ description: 'loop=true to repeat', typeList: ARGUMENT_TYPE.STRING }),
         ],
     }));
 
@@ -590,7 +601,7 @@ function registerLovenseTools() {
     registerFunctionTool({
         name: 'control_lovense_toy',
         displayName: 'Control Lovense Toy',
-        description: 'Trigger, adjust, or stop physical haptic feedback (vibration or preset patterns) on the user\'s physical Lovense toy. Use autonomously or upon request for scene pacing, reward, discipline, verbal conditioning, or surprise sensations.',
+        description: 'Trigger, adjust, or stop gentle haptic feedback on the user\'s Ferri. Fires ONCE by default — only set loop=true if the user explicitly asked for continuous/repeating play. Keep strength 0-3 (default 1), stop immediately on any stop cue.',
         parameters: {
             type: 'object',
             properties: {
@@ -601,11 +612,15 @@ function registerLovenseTools() {
                 },
                 strength: {
                     type: 'integer',
-                    description: 'Ferri intensity 0-3 ONLY (0=stop, 1=gentle, 2=moderate, 3=MAXIMUM — even 4 is too much). NEVER exceed 3.'
+                    description: 'Ferri intensity 0-3 ONLY (0=stop, 1=gentle default, 2=moderate, 3=MAXIMUM — even 4 is too much). NEVER exceed 3.'
                 },
                 duration: {
                     type: 'integer',
                     description: 'Duration in seconds, 1-60 (0 = hold for 60s).'
+                },
+                loop: {
+                    type: 'boolean',
+                    description: 'Set true ONLY if the user asked for continuous/repeating stimulation (e.g. "keep it going"). Default false = fire once and stop.'
                 },
                 toyId: {
                     type: 'string',
@@ -614,19 +629,20 @@ function registerLovenseTools() {
             },
             required: ['action', 'strength', 'duration']
         },
-        action: async ({ action, strength, duration, toyId }) => {
+        action: async ({ action, strength, duration, loop, toyId }) => {
             // Ferri safety: HARD CAP 3 for ALL actions (was 20, Pump-only 3).
-            let sanitizedStrength = Math.min(Math.max(strength, 0), 3);
+            let sanitizedStrength = Math.min(Math.max(strength ?? 1, 0), 3);
 
-            let finalDuration = duration === 0 ? 60 : Math.min(Math.max(duration, 1), 60);
+            let finalDuration = duration === 0 ? 60 : Math.min(Math.max(duration ?? 5, 1), 60);
+            const wantLoop = loop === true;
 
-            // Queue for looping after generation ends
-            messageCommands.push({ action, strength: sanitizedStrength, duration: finalDuration, toyId });
+            // Track for post-generation replay ONLY if loop=true (B).
+            messageCommands.push({ action, strength: sanitizedStrength, duration: finalDuration, toyId, loop: wantLoop });
 
             if (isMock) {
-                console.log(`[Lovense Mock Tool] action=${action}, strength=${sanitizedStrength}, duration=${finalDuration}s, toyId=${toyId || 'all'}`);
+                console.log(`[Lovense Mock Tool] action=${action}, strength=${sanitizedStrength}, duration=${finalDuration}s, loop=${wantLoop}, toyId=${toyId || 'all'}`);
                 window.toastr.info(
-                    `${action} @ Lvl ${sanitizedStrength} for ${finalDuration}s`,
+                    `${action} @ Lvl ${sanitizedStrength} for ${finalDuration}s${wantLoop ? ' (loop)' : ''}`,
                     'Lovense Mock (Tool Call)',
                 );
             }
@@ -638,9 +654,9 @@ function registerLovenseTools() {
                 return JSON.stringify({ status: "error", message: error.message });
             }
         },
-        formatMessage: ({ action, strength }) => {
+        formatMessage: ({ action, strength, loop }) => {
             const prefix = isMock ? '[Lovense Mock]' : '[Lovense]';
-            return `${prefix} Sending ${action} (Lvl ${strength})...`;
+            return `${prefix} Sending ${action} (Lvl ${strength})${loop ? ' looping' : ''}...`;
         },
         stealth: true
     });

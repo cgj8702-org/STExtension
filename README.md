@@ -32,9 +32,10 @@ This extension integrates Lovense adult toys with SillyTavern, allowing for phys
 
 - `/lovense [action] [strength] [duration]`
     - **Action:** `Vibrate`, `Rotate`, `Pump`, `Stop`
-    - **Strength:** `0` to `3` ONLY (Ferri max — even 4 is too much)
-    - **Duration:** Seconds (e.g., `5`)
-    - *Example:* `/lovense Vibrate 2 5`
+    - **Strength:** `0` to `3` ONLY, default `1` (Ferri max — even 4 is too much)
+    - **Duration:** Seconds (e.g., `5`); each command fires **once** by default
+    - **Loop:** add `true` as 4th arg to repeat until `/lovense-stop`
+    - *Example:* `/lovense Vibrate 1 5` (once) / `/lovense Vibrate 1 5 true` (loop)
 - `/lovense-stop`
     - Immediately stops all activity.
 
@@ -57,7 +58,7 @@ sanitising, `toyId` targeting, `GetToys`, and `delay` landmines.
 
 | Tool | Mirrors | Args |
 |---|---|---|
-| `control_lovense_toy` | ST native tool | `action, strength (0-3 Ferri max), duration (1-60s), toy_id, delay (0-300s)` |
+| `control_lovense_toy` | ST native tool | `action, strength (0-3 Ferri max, default 1), duration (1-60s), toy_id, loop (default false), delay (0-300s)` |
 | `SendStopFunction` | `/lovense-stop` | `toy_id` |
 | `SendFunctions` | legacy back-compat | `python_expression ("Vibrate:2"), duration, toy_id` |
 | `get_toys` | `client.getToys()` | — |
