@@ -1,0 +1,53 @@
+# RemoteMCP — Lovense MCP server config examples
+# Pick ONE of stdio / sse / streamable-http depending on your MCP host.
+
+# --- Claude Desktop / stdio (default) ---
+# {
+#   "mcpServers": {
+#     "lovense": {
+#       "command": "/home/carly/SillyTavern/public/scripts/extensions/third-party/STExtension/.venv/bin/python",
+#       "args": [
+#         "/home/carly/SillyTavern/public/scripts/extensions/third-party/STExtension/RemoteMCP.py",
+#         "CONNECTION_MODE=local",
+#         "GAME_MODE_IP=192.168.1.100",
+#         "GAME_MODE_PORT=30010"
+#       ]
+#     }
+#   }
+# }
+
+# --- Mock mode (no toy needed, for testing) ---
+# {
+#   "mcpServers": {
+#     "lovense-mock": {
+#       "command": "/home/carly/SillyTavern/public/scripts/extensions/third-party/STExtension/.venv/bin/python",
+#       "args": [
+#         "/home/carly/SillyTavern/public/scripts/extensions/third-party/STExtension/RemoteMCP.py",
+#         "CONNECTION_MODE=mock"
+#       ]
+#     }
+#   }
+# }
+
+# --- Server cloud mode ---
+# {
+#   "mcpServers": {
+#     "lovense-server": {
+#       "command": "/home/carly/SillyTavern/public/scripts/extensions/third-party/STExtension/.venv/bin/python",
+#       "args": [
+#         "/home/carly/SillyTavern/public/scripts/extensions/third-party/STExtension/RemoteMCP.py",
+#         "CONNECTION_MODE=server",
+#         "DEVELOPER_TOKEN=YOUR_TOKEN",
+#         "USER_ID=YOUR_UID"
+#       ]
+#     }
+#   }
+# }
+
+# --- SSE transport (hosts that need HTTP) ---
+# Run: .venv/bin/python RemoteMCP.py CONNECTION_MODE=mock MCP_TRANSPORT=sse MCP_PORT=8899
+# Then point your client at http://127.0.0.1:8899/sse
+
+# --- Streamable HTTP transport (modern default) ---
+# Run: .venv/bin/python RemoteMCP.py CONNECTION_MODE=mock MCP_TRANSPORT=streamable-http MCP_PORT=8899
+# Then point your client at http://127.0.0.1:8899/mcp

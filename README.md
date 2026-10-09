@@ -42,6 +42,73 @@ This extension integrates Lovense adult toys with SillyTavern, allowing for phys
 
 If you are using a model that supports **Function Calling** (e.g., GPT-4, Claude 3.5), enable "Function Calling" in the AI Response Configuration. The AI can now autonomously call `control_lovense_toy` to provide physical feedback during the roleplay.
 
+## RemoteMCP (standalone MCP server)
+
+`RemoteMCP.py` is a **standalone** MCP server for external hosts
+(Claude Desktop, etc.). It is **not** loaded by SillyTavern — the
+in-browser extension (`index.js` + `lovense-client.js`) handles ST
+function calling natively.
+
+It now mirrors the extension exactly: `local` / `server` / `mock`
+modes, all Function actions + Preset patterns, strength/duration
+sanitising, `toyId` targeting, `GetToys`, and `delay` landmines.
+
+### Tools
+
+| Tool | Mirrors | Args |
+|---|---|---|
+| `control_lovense_toy` | ST native tool | `action, strength (1-20), duration (1-60s), toy_id, delay (0-300s)` |
+| `SendStopFunction` | `/lovense-stop` | `toy_id` |
+| `SendFunctions` | legacy back-compat | `python_expression ("Vibrate:10"), duration, toy_id` |
+| `get_toys` | `client.getToys()` | — |
+| `get_status` | settings panel | — |
+
+Actions: `Vibrate, Rotate, Pump, Thrusting, Fingering, Suction,
+Oscillate, Pulse, Wave, Fireworks, Earthquake, Stop`
+(`random` → `Vibrate`; `Pump/Depth` clamp to 0-3; `>20` rescaled
+from 1-100; `duration 0` → 60s hold — same as `index.js`).
+
+### Run
+
+```bash
+cd public/scripts/extensions/third-party/STExtension
+uv venv --python 3.14
+uv pip install --python ./.venv/bin/python -r requirements.txt
+
+# local (Lovense Connect app)
+/.venv/bin/python RemoteMCP.py CONNECTION_MODE=local \
+  GAME_MODE_IP=192.168.1.100 GAME_MODE_PORT=30010
+
+# or explicit domain (== ST localDomain/localPort settings)
+/.venv/bin/python RemoteMCP.py CONNECTION_MODE=local \
+  LOCAL_DOMAIN=127-0-0-1.lovense.club LOCAL_PORT=30010
+
+# server cloud API
+/.venv/bin/python RemoteMCP.py CONNECTION_MODE=server \
+  DEVELOPER_TOKEN=... USER_ID=...
+
+# mock (no toy, for testing)
+/.venv/bin/python RemoteMCP.py CONNECTION_MODE=mock
+
+# HTTP transports for hosts that need them
+/.venv/bin/python RemoteMCP.py CONNECTION_MODE=mock \
+  MCP_TRANSPORT=sse MCP_PORT=8899            # -> http://127.0.0.1:8899/sse
+/.venv/bin/python RemoteMCP.py CONNECTION_MODE=mock \
+  MCP_TRANSPORT=streamable-http MCP_PORT=8899 # -> http://127.0.0.1:8899/mcp
+```
+
+All options also work as env vars (`CONNECTION_MODE`,
+`GAME_MODE_IP`, …). CLI `KEY=VALUE` wins. See `mcp.example.json`
+for Claude Desktop configs.
+
+Notes:
+
+- Local HTTPS uses Lovense's self-signed cert → `verify=False` by
+  default (same as the browser's first-use cert exception). Set
+  `VERIFY_SSL=true` only if you installed the cert.
+- `stdio` logs to **stderr** so stdout stays clean for the protocol.
+- Server-mode token is never logged.
+
 ## Security Note
 
 Developer tokens used in Server Mode are stored in plain text within the extension settings. For enhanced privacy and security, we recommend using **Local PC/Mac Connect** mode.
