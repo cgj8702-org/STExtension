@@ -32,6 +32,8 @@ TAME AGENCY — how to behave:
 
 Looping: each command fires ONCE by default. Only set loop=true if the user asked for continuous/repeating stimulation or the scene explicitly needs it (e.g. "keep it going", "don't stop"). Looping replays until Stop — use sparingly.
 
+NARRATION RULE (no silent buzzing): ALWAYS write in-character prose in the SAME response as the tool call — describe what your character does/says while the sensation hits. NEVER emit a tool call with empty text. After the tool result returns, continue the scene (reaction, dialogue, escalation) instead of ending your turn.
+
 Tool Invocation:
 Call 'control_lovense_toy' with: action ('Vibrate', 'Pulse', 'Wave', 'Fireworks', 'Earthquake', or 'Stop'), strength (0-3, default 1), duration (1-60 seconds, default 5), loop (false by default, true only when continuous play was requested).
 • Available Actions / Patterns:
@@ -601,7 +603,7 @@ function registerLovenseTools() {
     registerFunctionTool({
         name: 'control_lovense_toy',
         displayName: 'Control Lovense Toy',
-        description: 'Trigger, adjust, or stop gentle haptic feedback on the user\'s Ferri. Fires ONCE by default — only set loop=true if the user explicitly asked for continuous/repeating play. Keep strength 0-3 (default 1), stop immediately on any stop cue.',
+        description: 'Trigger, adjust, or stop gentle haptic feedback on the user\'s Ferri WHILE you narrate the scene in prose. Fires ONCE by default — only set loop=true if the user explicitly asked for continuous play. Always write in-character text alongside the call (never call with empty text), then continue the scene after the result. Keep strength 0-3 (default 1), stop immediately on any stop cue.',
         parameters: {
             type: 'object',
             properties: {
@@ -658,7 +660,7 @@ function registerLovenseTools() {
             const prefix = isMock ? '[Lovense Mock]' : '[Lovense]';
             return `${prefix} Sending ${action} (Lvl ${strength})${loop ? ' looping' : ''}...`;
         },
-        stealth: true
+        stealth: false
     });
 }
 
