@@ -32,9 +32,9 @@ This extension integrates Lovense adult toys with SillyTavern, allowing for phys
 
 - `/lovense [action] [strength] [duration]`
     - **Action:** `Vibrate`, `Rotate`, `Pump`, `Stop`
-    - **Strength:** `1` to `20` (1-3 for Pump)
+    - **Strength:** `0` to `3` ONLY (Ferri max — even 4 is too much)
     - **Duration:** Seconds (e.g., `5`)
-    - *Example:* `/lovense Vibrate 15 5`
+    - *Example:* `/lovense Vibrate 2 5`
 - `/lovense-stop`
     - Immediately stops all activity.
 
@@ -57,16 +57,16 @@ sanitising, `toyId` targeting, `GetToys`, and `delay` landmines.
 
 | Tool | Mirrors | Args |
 |---|---|---|
-| `control_lovense_toy` | ST native tool | `action, strength (1-20), duration (1-60s), toy_id, delay (0-300s)` |
+| `control_lovense_toy` | ST native tool | `action, strength (0-3 Ferri max), duration (1-60s), toy_id, delay (0-300s)` |
 | `SendStopFunction` | `/lovense-stop` | `toy_id` |
-| `SendFunctions` | legacy back-compat | `python_expression ("Vibrate:10"), duration, toy_id` |
+| `SendFunctions` | legacy back-compat | `python_expression ("Vibrate:2"), duration, toy_id` |
 | `get_toys` | `client.getToys()` | — |
 | `get_status` | settings panel | — |
 
 Actions: `Vibrate, Rotate, Pump, Thrusting, Fingering, Suction,
 Oscillate, Pulse, Wave, Fireworks, Earthquake, Stop`
-(`random` → `Vibrate`; `Pump/Depth` clamp to 0-3; `>20` rescaled
-from 1-100; `duration 0` → 60s hold — same as `index.js`).
+(Ferri HARD CAP 0-3 for ALL actions; legacy 1-20 / 1-100 rescaled;
+`duration 0` → 60s hold — same as `index.js`).
 
 ### Run
 

@@ -21,24 +21,25 @@ const defaultSettings = Object.freeze({
     userId: '',
     customGuidelines: `You have access to the tool 'control_lovense_toy' to control the user's active physical Lovense device.
 
+SAFETY LIMIT (HARD CAP): The connected Ferri is extremely sensitive. NEVER exceed strength 3. Strength 0 = stop, 1 = gentle tease, 2 = moderate, 3 = MAXIMUM. Even 4 is physically too much. If a scene calls for "intense" or "maximum", use strength 3 with a longer duration instead. Always clamp any requested strength above 3 down to 3.
+
 Operational Rules & Agency:
-1. Direct Requests: Execute or adjust direct user requests in-character based on your authority and intent.
+1. Direct Requests: Execute or adjust direct user requests in-character based on your authority and intent (still capped at 3).
 2. Autonomous Agency: You do not need to wait for a command or physical touch. If the device is active, you are encouraged to trigger, adjust, or stop stimulation autonomously to control the pace, tension, and atmosphere.
 3. Reward & Discipline:
-   - Reward compliance or obedience with pleasant stimulation (strength 5-12).
-   - Use high-intensity bursts (strength 13-20) to break defiance, test limits, or demand total surrender.
+   - Reward compliance or obedience with pleasant stimulation (strength 1-2).
+   - Use strength 3 bursts to break defiance, test limits, or demand total surrender. NEVER go above 3.
    - Use 'Stop' (or strength 0) to withhold pleasure, enforce stillness, or penalize eagerness.
 4. Verbal Triggers & Conditioning: You may link stimulation to specific verbal cues (e.g. triggering a pulse whenever you issue a direct order or use key phrases).
 5. Surprise Triggers: You do not always need to announce a trigger in advance. Let the physical sensation hit unexpectedly mid-dialogue.
 
-Intensity Scale:
-• Gentle (1-5): Low hum, subtle background tease, establishing presence.
-• Moderate (6-12): Focused sensation, building physical and psychological tension.
-• Intense (13-18): Deep, overwhelming feedback testing physical endurance.
-• Maximum (19-20): Sudden intense surges or climactic peaks.
+Intensity Scale (Ferri-calibrated, HARD MAX 3):
+• Gentle (1): Low hum, subtle background tease, establishing presence.
+• Moderate (2): Focused sensation, building physical and psychological tension.
+• Maximum (3): ABSOLUTE CEILING. Overwhelming for this device. Never exceed.
 
 Tool Invocation:
-Call 'control_lovense_toy' with parameters: action ('Vibrate', 'Pulse', 'Wave', 'Fireworks', 'Earthquake', or 'Stop'), strength (1-20), and duration (1-60 seconds).
+Call 'control_lovense_toy' with parameters: action ('Vibrate', 'Pulse', 'Wave', 'Fireworks', 'Earthquake', or 'Stop'), strength (0-3, NEVER above 3), and duration (1-60 seconds).
 • Available Actions / Patterns:
   - 'Vibrate': Direct manual vibration strength.
   - 'Pulse': Rhythmic pulsing sensation.
@@ -186,13 +187,13 @@ function generateDynamicPrompt() {
     }
 
     const capabilityDescriptions = {
-        'vibrate': '• Vibrate (1-20): ALL devices',
-        'rotate': '• Rotate (1-20): Nora, Diamo, Ridge',
-        'pump': '• Pump (1-3): Max, Max 2',
-        'thrusting': '• Thrusting (1-20): Solace, Sex Machine, Gravity',
-        'fingering': '• Fingering (1-20): Flexer',
-        'suction': '• Suction (1-20): Tenera',
-        'oscillate': '• Oscillate (1-20): Osci series',
+        'vibrate': '• Vibrate (0-3 MAX): ALL devices — Ferri-calibrated, never exceed 3',
+        'rotate': '• Rotate (0-3 MAX): Nora, Diamo, Ridge',
+        'pump': '• Pump (0-3): Max, Max 2',
+        'thrusting': '• Thrusting (0-3 MAX): Solace, Sex Machine, Gravity',
+        'fingering': '• Fingering (0-3 MAX): Flexer',
+        'suction': '• Suction (0-3 MAX): Tenera',
+        'oscillate': '• Oscillate (0-3 MAX): Osci series',
     };
 
     const capabilitiesText = Array.from(capabilities)
@@ -334,12 +335,16 @@ function registerParserHook(lovenseClient) {
             action = 'Vibrate';
         }
 
-        let strength = commandData.strength !== undefined ? Number(commandData.strength) : 10;
-        // Handle models that hallucinated 1-100 scales instead of 1-20
+        let strength = commandData.strength !== undefined ? Number(commandData.strength) : 2;
+        // Ferri safety: HARD CAP 3. Rescale legacy 1-20 / hallucinated 1-100.
         if (strength > 20) {
             strength = Math.round(strength * 20 / 100);
         }
-        strength = Math.min(Math.max(strength, 0), 20);
+        if (strength > 3) {
+            console.warn(`${prefix} Strength ${strength} exceeds Ferri max 3 — clamping.`);
+            strength = 3;
+        }
+        strength = Math.min(Math.max(strength, 0), 3);
 
         let duration = commandData.duration_sec !== undefined ? Number(commandData.duration_sec) : (commandData.duration !== undefined ? Number(commandData.duration) : 5);
         duration = Math.min(Math.max(duration, 1), 60);
@@ -543,12 +548,13 @@ function registerLovenseSlashCommands() {
         callback: async (namedArgs, unnamedArgs) => {
             const argsArray = Array.isArray(unnamedArgs) ? unnamedArgs : [unnamedArgs];
             const action = String(argsArray[0] || '');
-            const strength = argsArray[1] ? Number(argsArray[1]) : 10;
+            // Ferri safety: default 2, HARD CAP 3.
+            const strength = Math.min(Math.max(argsArray[1] ? Number(argsArray[1]) : 2, 0), 3);
             const duration = argsArray[2] ? Number(argsArray[2]) : 5;
             if (!action) return 'Usage: /lovense [action] [strength] [duration]';
             try {
-                await client.sendCommand({ action, strength: strength || 10, duration: duration || 5 });
-                return `Lovense: ${action} triggered.`;
+                await client.sendCommand({ action, strength, duration: duration || 5 });
+                return `Lovense: ${action} @ ${strength} triggered.`;
             } catch (e) {
                 return `Lovense Error: ${e.message}`;
             }
@@ -595,11 +601,11 @@ function registerLovenseTools() {
                 },
                 strength: {
                     type: 'integer',
-                    description: 'The intensity level of the vibration. Must be an integer between 1 and 20 (1 is gentlest, 20 is most intense).'
+                    description: 'Ferri intensity 0-3 ONLY (0=stop, 1=gentle, 2=moderate, 3=MAXIMUM — even 4 is too much). NEVER exceed 3.'
                 },
                 duration: {
                     type: 'integer',
-                    description: 'The duration of the physical vibration in seconds. Must be an integer between 1 and 20.'
+                    description: 'Duration in seconds, 1-60 (0 = hold for 60s).'
                 },
                 toyId: {
                     type: 'string',
@@ -609,9 +615,8 @@ function registerLovenseTools() {
             required: ['action', 'strength', 'duration']
         },
         action: async ({ action, strength, duration, toyId }) => {
-            let sanitizedStrength = ['Pump', 'Depth'].includes(action)
-                ? Math.min(Math.max(strength, 0), 3)
-                : Math.min(Math.max(strength, 0), 20);
+            // Ferri safety: HARD CAP 3 for ALL actions (was 20, Pump-only 3).
+            let sanitizedStrength = Math.min(Math.max(strength, 0), 3);
 
             let finalDuration = duration === 0 ? 60 : Math.min(Math.max(duration, 1), 60);
 

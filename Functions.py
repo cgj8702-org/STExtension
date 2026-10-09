@@ -18,8 +18,8 @@ def _client_for_domain(domain_url):
 
 
 def SendFunctions(domainUrl, toys, commands, time_sec):
-    """Legacy: commands like 'Vibrate:10'. Splits action/strength."""
-    action, strength = "Vibrate", 10
+    """Legacy: commands like 'Vibrate:2'. Splits action/strength."""
+    action, strength = "Vibrate", 2
     if commands:
         if ":" in str(commands):
             a, _, s = str(commands).partition(":")
@@ -27,7 +27,7 @@ def SendFunctions(domainUrl, toys, commands, time_sec):
             try:
                 strength = int(s)
             except ValueError:
-                strength = 10
+                strength = 2
         else:
             action = str(commands)
     client = _client_for_domain(domainUrl)
@@ -35,7 +35,7 @@ def SendFunctions(domainUrl, toys, commands, time_sec):
                                toy_id=toys or None)
 
 
-def control_toy(client, action="Vibrate", strength=10,
+def control_toy(client, action="Vibrate", strength=2,
                 duration=5, toy_id=None, delay=0):
     """Full-parity helper: sanitise + optional delayed 'landmine' execution."""
     import time as _time

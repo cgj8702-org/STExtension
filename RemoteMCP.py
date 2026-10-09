@@ -84,13 +84,13 @@ def _require_client():
 
 
 @mcp.tool()
-def control_lovense_toy(action: str = "Vibrate", strength: int = 10, duration: int = 5, toy_id: str = "", delay: int = 0) -> dict:
+def control_lovense_toy(action: str = "Vibrate", strength: int = 2, duration: int = 5, toy_id: str = "", delay: int = 0) -> dict:
     """Control the user's Lovense toy. Mirrors the SillyTavern 'control_lovense_toy' tool.
 
     Args:
         action: Vibrate, Rotate, Pump, Thrusting, Fingering, Suction, Oscillate,
             Pulse, Wave, Fireworks, Earthquake, or Stop. 'random' maps to Vibrate.
-        strength: 1-20 (Pump/Depth clamp to 0-3). Values >20 rescaled from 1-100.
+        strength: Ferri 0-3 ONLY (0=stop, 1=gentle, 2=moderate, 3=MAX — even 4 is too much). Clamped.
         duration: seconds 1-60. 0 means hold -> 60s.
         toy_id: optional toy ID (omit for all toys).
         delay: optional seconds 0-300 to wait before firing (haptic landmine).
@@ -114,14 +114,14 @@ def control_lovense_toy(action: str = "Vibrate", strength: int = 10, duration: i
 
 
 @mcp.tool()
-def SendFunctions(python_expression: str = "Vibrate:10", duration: int = 2, toy_id: str = "") -> dict:
+def SendFunctions(python_expression: str = "Vibrate:2", duration: int = 2, toy_id: str = "") -> dict:
     """Legacy tool (kept for back-compat). Prefer control_lovense_toy."""
     try:
-        action, _, s = str(python_expression or "Vibrate:10").partition(":")
+        action, _, s = str(python_expression or "Vibrate:2").partition(":")
         try:
-            strength = int(s) if s else 10
+            strength = int(s) if s else 2
         except ValueError:
-            strength = 10
+            strength = 2
         result = _require_client().send_command(action or "Vibrate", strength, duration, toy_id or None)
         return {"success": True, "message": "Sent %s" % python_expression, "detail": result}
     except Exception as e:

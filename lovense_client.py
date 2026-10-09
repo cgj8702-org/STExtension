@@ -46,16 +46,16 @@ def normalize_action(action):
 
 
 def sanitize_strength(action, strength):
-    """Clamp strength. Handles models hallucinating a 1-100 scale."""
+    """Ferri safety: HARD CAP 3 for ALL actions. Rescales legacy 1-20/1-100."""
     try:
         s = int(round(float(strength)))
     except (TypeError, ValueError):
-        s = 10
+        s = 2
     if s > 20:
         s = round(s * 20 / 100)
-    if str(action).lower() in ("pump", "depth"):
-        return min(max(s, 0), 3)
-    return min(max(s, 0), 20)
+    if s > 3:
+        s = 3
+    return min(max(s, 0), 3)
 
 
 def sanitize_duration(duration):
@@ -95,7 +95,7 @@ class LovenseClient:
     def local_base_url(self):
         return "https://%s:%s/command" % (self.local_domain, self.local_port)
 
-    def send_command(self, action="Vibrate", strength=10, duration=5, toy_id=None):
+    def send_command(self, action="Vibrate", strength=2, duration=5, toy_id=None):
         action = normalize_action(action)
         strength = sanitize_strength(action, strength)
         duration = sanitize_duration(duration)
