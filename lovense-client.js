@@ -37,8 +37,29 @@ export class LovenseClient {
         return { code: 200, result: true, type: 'mock' };
     }
 
+    getLocalUrl(endpoint = '/command') {
+        let domain = (this.settings.localDomain || '127-0-0-1.lovense.club').trim();
+        const port = (this.settings.localPort || '30010').toString().trim();
+
+        let protocol = 'https:';
+        if (domain.startsWith('http://')) {
+            protocol = 'http:';
+            domain = domain.slice(7);
+        } else if (domain.startsWith('https://')) {
+            protocol = 'https:';
+            domain = domain.slice(8);
+        }
+
+        domain = domain.replace(/\/+$/, '');
+
+        if (domain.includes(':')) {
+            return `${protocol}//${domain}${endpoint}`;
+        }
+        return `${protocol}//${domain}:${port}${endpoint}`;
+    }
+
     async sendLocalCommand(action, strength, duration, toyId) {
-        const url = `https://${this.settings.localDomain || '127-0-0-1.lovense.club'}:${this.settings.localPort || '30010'}/command`;
+        const url = this.getLocalUrl('/command');
         const lowerAction = action.toLowerCase();
         const presets = ['pulse', 'wave', 'fireworks', 'earthquake'];
         
@@ -120,18 +141,68 @@ export class LovenseClient {
             return { error: "Toy query only fully supported in Local Mode" };
         }
         
-        const url = `https://${this.settings.localDomain || '127-0-0-1.lovense.club'}:${this.settings.localPort || '30010'}/command`;
+        const url = this.getLocalUrl('/command');
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 4000);
+
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: "GetToys" })
+                body: JSON.stringify({ command: "GetToys" }),
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                return { error: `HTTP ${response.status}: ${response.statusText}` };
+            }
+
             const result = await response.json();
-            return JSON.parse(result.data?.toys || '{}');
+            let toys = result.data?.toys;
+            if (typeof toys === 'string') {
+                try {
+                    toys = JSON.parse(toys);
+                } catch {
+                    toys = {};
+                }
+            } else if (!toys || typeof toys !== 'object') {
+                toys = {};
+            }
+            return toys;
         } catch (e) {
-            console.error("Failed to query local Lovense toys:", e);
-            throw e;
+            return { error: e.name === 'AbortError' ? 'Connection timed out' : (e.message || String(e)) };
+        }
+    }
+
+    async testConnection() {
+        if (this.isMock) {
+            const toys = this.getMockToys();
+            return { ok: true, mode: 'mock', toys, count: Object.keys(toys).length };
+        }
+
+        if (this.isLocal) {
+            const result = await this.getToys();
+            if (result && !result.error) {
+                const count = Object.keys(result).length;
+                return { ok: true, mode: 'local', toys: result, count };
+            }
+            return { ok: false, mode: 'local', error: result?.error || 'Could not connect to Lovense daemon' };
+        }
+
+        // Server mode
+        if (!this.settings.developerToken || !this.settings.userId) {
+            return { ok: false, mode: 'server', error: 'Developer Token and User ID are required for Server Mode.' };
+        }
+
+        try {
+            const res = await this.sendCommand({ action: 'Stop', strength: 0, duration: 0 });
+            if (res.code === 200 || res.result === true) {
+                return { ok: true, mode: 'server', message: 'Server API reachable' };
+            }
+            return { ok: false, mode: 'server', error: res.message || `Server returned code ${res.code}` };
+        } catch (e) {
+            return { ok: false, mode: 'server', error: e.message || String(e) };
         }
     }
 
