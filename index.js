@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { LovenseClient } from './lovense-client.js?v=13';
+import { LovenseClient } from './lovense-client.js?v=14';
 import { SlashCommandParser } from '/scripts/slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '/scripts/slash-commands/SlashCommand.js';
 import { SlashCommandArgument, ARGUMENT_TYPE } from '/scripts/slash-commands/SlashCommandArgument.js';
@@ -39,6 +39,7 @@ Intensity Scale:
 
 Tool Invocation:
 Call 'control_lovense_toy' with parameters: action ('Vibrate', 'Pulse', 'Wave', 'Fireworks', 'Earthquake', or 'Stop'), strength (1-20), and duration (1-60 seconds).
+Only use these exact parameters (action, strength, duration, and optionally toyId). Do NOT invent additional parameters or action types.
 • Available Actions / Patterns:
   - 'Vibrate': Direct manual vibration strength.
   - 'Pulse': Rhythmic pulsing sensation.
@@ -46,7 +47,7 @@ Call 'control_lovense_toy' with parameters: action ('Vibrate', 'Pulse', 'Wave', 
   - 'Fireworks': Explosive, erratic pattern bursts.
   - 'Earthquake': Heavy, intense rumbling.
   - 'Stop': Immediately halt all device activity.
-    (Fallback: If tool calls are unsupported, include "lovense": {"action": "Vibrate", "strength": X, "duration": Y} in your JSON tracker).
+    (Fallback: If tool calls are unsupported, include "lovense": {"action": "Vibrate", "strength": X, "duration": Y} in your JSON tracker, or call <call:control_lovense_toy action="Vibrate" strength="10" duration="5"/>).
 
 `,
 });
@@ -308,11 +309,14 @@ function parseAttributes(attrString) {
     }
 
     // Standard attribute pattern: key="value" or key='value' or key=value
-    const regex = /([a-zA-Z0-9_\-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
+    const regex = /([a-zA-Z0-9_\-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>,)]+))/g;
     let match;
     while ((match = regex.exec(attrString)) !== null) {
         const key = match[1];
-        const val = match[2] ?? match[3] ?? match[4];
+        let val = match[2] ?? match[3] ?? match[4];
+        if (typeof val === 'string') {
+            val = val.replace(/[,;]+$/, '').trim();
+        }
         attrs[key] = val;
     }
     return attrs;
@@ -447,6 +451,21 @@ function registerParserHook(lovenseClient) {
                 }
             } catch (e) {
                 console.error("[Lovense Fallback] Failed to parse XML-style tag attributes:", e);
+            }
+        }
+
+        // 3. Parse inline pseudo-function calls: `control_lovense_toy(action="Pulse", strength=4, duration=60)`
+        const inlineFuncRegex = /(?:`|\b)control_lovense_toy\s*\(([^)]+?)\)(?:`|\b)/g;
+        while ((match = inlineFuncRegex.exec(mes)) !== null) {
+            try {
+                const argString = match[1];
+                const parsedAttrs = parseAttributes(argString);
+                if (parsedAttrs && (parsedAttrs.action || parsedAttrs.strength !== undefined)) {
+                    console.warn("[Lovense Fallback] Found inline function call:", parsedAttrs);
+                    executeFallbackCommand(parsedAttrs);
+                }
+            } catch (e) {
+                console.error("[Lovense Fallback] Failed to parse inline function call:", e);
             }
         }
     }
