@@ -170,7 +170,7 @@ class LovenseClient:
             result = resp.json()
         except Exception:
             result = {"status_code": resp.status_code, "text": resp.text}
-        print("SendCommand Response: %s" % (result,))
+        logger.info("SendCommand Response: %s", result)
         return {"http_status": resp.status_code, "response": result}
 
     def _post_server(self, payload):
@@ -183,7 +183,7 @@ class LovenseClient:
             result = resp.json()
         except Exception:
             result = {"status_code": resp.status_code, "text": resp.text}
-        print("SendCommand Response: %s" % (result,))
+        logger.info("SendCommand Response: %s", result)
         return {"http_status": resp.status_code, "response": result}
 
     def _send_local(self, action, strength, duration, toy_id):
@@ -196,5 +196,5 @@ class LovenseClient:
 
     def _send_mock(self, action, strength, duration, toy_id):
         latency_ms = 150 + int(time.time() * 1000) % 250
-        print("[Lovense Mock] %s @ Lvl %s for %ss toy=%s (simulated %sms)" % (action, strength, duration, toy_id or "all", latency_ms))
+        logger.info("[Lovense Mock] %s @ Lvl %s for %ss toy=%s (simulated %sms)", action, strength, duration, toy_id or "all", latency_ms)
         return {"code": 200, "result": True, "type": "mock", "action": action, "strength": strength, "duration": duration, "toy": toy_id or "all"}

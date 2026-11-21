@@ -1,5 +1,9 @@
 // @ts-nocheck
-import { LovenseClient } from './lovense-client.js?v=14';
+import { LovenseClient } from './lovense-client.js?v=15';
+import {
+    clampStrength, clampDuration, clampDelay,
+    convertRedactedTags, DelayedCommandQueue, createUnlockSession,
+} from './haptic-utils.js?v=15';
 import { SlashCommandParser } from '/scripts/slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '/scripts/slash-commands/SlashCommand.js';
 import { SlashCommandArgument, ARGUMENT_TYPE } from '/scripts/slash-commands/SlashCommandArgument.js';
@@ -19,6 +23,8 @@ const defaultSettings = Object.freeze({
     localDomain: '127-0-0-1.lovense.club',
     developerToken: '',
     userId: '',
+    allowDelayedCommands: false, // opt-in: model may schedule commands for later
+    enableHapticUnlock: false, // opt-in: <redacted> secrets unlocked by a haptic cycle
     customGuidelines: `You have access to the tool 'control_lovense_toy' to control the user's physical Lovense Ferri device.
 
 SAFETY LIMIT (HARD CAP): NEVER exceed strength 3. 0 = stop, 1 = gentle tease, 2 = moderate, 3 = MAXIMUM. Even 4 is physically too much. If a scene calls for "intense", use strength 3 with a longer duration instead.
@@ -43,7 +49,7 @@ Call 'control_lovense_toy' with: action ('Vibrate', 'Pulse', 'Wave', 'Fireworks'
   - 'Fireworks': Explosive, erratic pattern bursts.
   - 'Earthquake': Heavy, intense rumbling.
   - 'Stop': Immediately halt all device activity.
-    (Fallback: If tool calls are unsupported, include "lovense": {"action": "Vibrate", "strength": X, "duration": Y} in your JSON tracker, or call <call:control_lovense_toy action="Vibrate" strength="10" duration="5"/>).
+    (Fallback: If tool calls are unsupported, include "lovense": {"action": "Vibrate", "strength": X, "duration": Y} in your JSON tracker, or call <call:control_lovense_toy action="Vibrate" strength="1" duration="5"/>).
 
 `,
 });
@@ -63,6 +69,12 @@ let messageCommands = [];
 let loopInterval = null;
 let currentLoopIndex = 0;
 let isLooping = false;
+
+// Delayed commands + haptic unlocks + generation window
+let delayedQueue = null;
+const activeUnlocks = new Set(); // abort() functions of running unlock sessions
+let generationInFlight = false;
+let generationGraceUntil = 0; // ms timestamp; late render events right after a generation still count
 
 function getSettings() {
     const { extensionSettings } = stContext;
@@ -136,15 +148,36 @@ function startLoopingCommands() {
 
 /**
  * Stop playback and send a stop signal to all devices.
- * Also called defensively on GENERATION_ENDED before any loop=true replay.
+ * Used by Stop / Stop All. (GENERATION_ENDED only clears loop state, see clearLoopState.)
  */
-function stopLoopingCommands() {
+function clearLoopState() {
     isLooping = false;
     if (loopInterval) {
         clearTimeout(loopInterval);
         loopInterval = null;
     }
     currentLoopIndex = 0;
+}
+
+/** Cancel delayed commands and abort running haptic unlocks. Does not touch the device. */
+function cancelPendingActivity() {
+    const cancelled = delayedQueue ? delayedQueue.cancelAll() : 0;
+    for (const abort of [...activeUnlocks]) {
+        try { abort(); } catch (e) { console.warn('[Lovense] Unlock abort failed:', e); }
+    }
+    activeUnlocks.clear();
+    if (cancelled > 0) console.log(`[Lovense] Cancelled ${cancelled} pending delayed command(s)`);
+}
+
+/** Full stop: pending delays, running unlocks, loops, and the device itself. */
+function stopEverything() {
+    cancelPendingActivity();
+    messageCommands = [];
+    stopLoopingCommands();
+}
+
+function stopLoopingCommands() {
+    clearLoopState();
 
     if (client) {
         client.sendCommand({ action: 'Stop', strength: 0, duration: 0 })
@@ -202,17 +235,28 @@ async function updateToyCache() {
 /**
  * Generates dynamic instructions based on connected toys and capabilities
  */
+const DELAY_GUIDELINES = `DELAYED COMMANDS (the user enabled this): pass 'delay' (seconds, 1-300) to schedule a command that fires later, while the user keeps reading. Because the user opted in, the timing may be left unannounced in-story. Same limits as always: strength 0-3, never open with 3, at most 3 delayed commands pending, and any Stop cancels everything pending. Do not stack delayed commands to build up total intensity.`;
+
+const UNLOCK_GUIDELINES = `HAPTIC UNLOCK (the user enabled this): you may hide a secret inside <redacted haptic_unlock="true" action="Pulse" strength="1" duration="20">secret text</redacted>. The text stays blurred until the USER chooses to start the cycle and the toy finishes it; the user can cancel at any time, which keeps it hidden. The extension fires the toy itself — do NOT also call control_lovense_toy for that cycle. strength 0-3, duration 1-60. Never hide information the story cannot proceed without.`;
+
+function getOptionalGuidelines() {
+    const parts = [];
+    if (settings?.allowDelayedCommands) parts.push(DELAY_GUIDELINES);
+    if (settings?.enableHapticUnlock) parts.push(UNLOCK_GUIDELINES);
+    return parts.length ? `\n\n${parts.join('\n\n')}` : '';
+}
+
 function generateDynamicPrompt() {
     const toyKeys = Object.keys(cachedToys);
-    const guidelines = settings?.customGuidelines || defaultSettings.customGuidelines;
+    const guidelines = (settings?.customGuidelines || defaultSettings.customGuidelines) + getOptionalGuidelines();
 
     if (toyKeys.length === 0) {
         return `[LOVENSE SYSTEM INSTRUCTION: You can control the user's Lovense device during this conversation:
 Connected devices: Active Lovense Device (Default)
 
 Capabilities:
-• Vibrate (1-20): ALL devices
-• Patterns: Pulse, Wave, Fireworks, Earthquake (1-20)
+• Vibrate (0-3 MAX): ALL devices — never exceed 3
+• Patterns: Pulse, Wave, Fireworks, Earthquake (strength 0-3 MAX)
 • Stop: Halt device activity
 
 ${guidelines}]`;
@@ -287,10 +331,57 @@ function updateLovensePrompt() {
 
 
 function handleToolResponse(apiResponse) {
+    if (apiResponse.scheduled) {
+        return JSON.stringify({ status: 'scheduled', delay_seconds: apiResponse.delay });
+    }
     if (apiResponse.code === 200 || apiResponse.result === true) {
         return JSON.stringify({ status: 'success' });
     }
     return JSON.stringify({ status: 'error', code: apiResponse.code });
+}
+
+function getDelayedQueue() {
+    if (!delayedQueue) {
+        delayedQueue = new DelayedCommandQueue({
+            send: cmd => client.sendCommand(cmd),
+            onError: e => console.error('[Lovense] Delayed command failed:', e),
+            onChange: n => window.$('#lovense_pending_count').text(String(n)),
+        });
+    }
+    return delayedQueue;
+}
+
+/**
+ * Single choke point for device commands from the tool, parser and slash command.
+ * - Stop cancels delayed commands, unlocks and loops, then stops the device.
+ * - delay is honoured only when the user enabled "Allow delayed commands".
+ * Callers must pass already-clamped strength/duration.
+ */
+async function dispatchCommand({ action, strength, duration, toyId = null, delay = 0 }) {
+    if (String(action).toLowerCase() === 'stop') {
+        cancelPendingActivity();
+        clearLoopState();
+        messageCommands = []; // a Stop mid-message must not be undone by a loop replay at generation end
+        return client.sendCommand({ action: 'Stop', strength: 0, duration: 0, toyId });
+    }
+
+    let wait = clampDelay(delay);
+    if (wait > 0 && !settings.allowDelayedCommands) {
+        console.warn('[Lovense] delay requested but delayed commands are disabled — firing immediately.');
+        wait = 0;
+    }
+
+    if (wait > 0) {
+        const res = getDelayedQueue().schedule({ action, strength, duration, toyId }, wait);
+        if (!res.ok) return { code: 429, result: false, message: res.reason };
+        console.log(`[Lovense] Scheduled ${action} @ ${strength} for ${duration}s in ${wait}s`);
+        if (settings.connectionMode === 'mock') {
+            window.toastr.info(`${action} @ Lvl ${strength} in ${wait}s`, 'Lovense Mock (Delayed)');
+        }
+        return { code: 200, result: true, scheduled: true, delay: wait };
+    }
+
+    return client.sendCommand({ action, strength, duration, toyId });
 }
 
 function parseAttributes(attrString) {
@@ -374,46 +465,36 @@ function registerParserHook(lovenseClient) {
         const prefix = isMock ? '[Lovense Mock Parser]' : '[Lovense Parser]';
 
         let action = commandData.action || 'Vibrate';
-        if (action.toLowerCase() === 'pulse' || action.toLowerCase() === 'random') {
+        if (String(action).toLowerCase() === 'random') {
             action = 'Vibrate';
         }
 
-        let strength = commandData.strength !== undefined ? Number(commandData.strength) : 2;
-        // Ferri safety: HARD CAP 3. Rescale legacy 1-20 / hallucinated 1-100.
-        if (strength > 20) {
-            strength = Math.round(strength * 20 / 100);
-        }
-        if (strength > 3) {
-            console.warn(`${prefix} Strength ${strength} exceeds Ferri max 3 — clamping.`);
-            strength = 3;
-        }
-        strength = Math.min(Math.max(strength, 0), 3);
+        // Ferri safety: HARD CAP 3 (also rescales legacy 1-20 / hallucinated 1-100 values).
+        const strength = clampStrength(commandData.strength, 1);
+        const rawDuration = commandData.duration_sec !== undefined ? commandData.duration_sec : commandData.duration;
+        const duration = clampDuration(rawDuration, 5);
+        const delay = clampDelay(commandData.delay);
 
-        let duration = commandData.duration_sec !== undefined ? Number(commandData.duration_sec) : (commandData.duration !== undefined ? Number(commandData.duration) : 5);
-        duration = Math.min(Math.max(duration, 1), 60);
+        // Only target a specific toy when the model named one. (Never invent a mock ID for a real device.)
+        const toyId = commandData.toyId || commandData.device_id || null;
+        const loop = (commandData.loop === true || commandData.loop === 'true') && delay === 0;
 
-        const toyId = commandData.toyId || commandData.device_id || 'mock-ferri-001';
-        const loop = commandData.loop === true || commandData.loop === 'true';
-
-        console.warn(`${prefix} Executing: action=${action}, strength=${strength}, duration=${duration}s, toyId=${toyId}, loop=${loop}`);
+        console.warn(`${prefix} Executing: action=${action}, strength=${strength}, duration=${duration}s, toyId=${toyId}, loop=${loop}, delay=${delay}s`);
 
         if (isMock) {
             window.toastr.info(
-                `${action} @ Lvl ${strength} for ${duration}s${loop ? ' (loop)' : ''}`,
+                `${action} @ Lvl ${strength} for ${duration}s${loop ? ' (loop)' : ''}${delay ? ` in ${delay}s` : ''}`,
                 'Lovense Mock (Parser)',
             );
         }
 
-        // Track for post-generation replay ONLY if loop=true (B). Fire-once (C)
-        // already executes immediately below — no replay needed otherwise.
-        messageCommands.push({ action, strength, duration, toyId, loop });
+        // Track for post-generation replay ONLY if loop=true. Fire-once otherwise.
+        if (delay === 0) {
+            messageCommands.push({ action, strength, duration, toyId, loop });
+        }
 
-        lovenseClient.sendCommand({
-            action,
-            strength,
-            duration,
-            toyId
-        }).catch(e => console.error(`${prefix} Command failed:`, e));
+        dispatchCommand({ action, strength, duration, toyId, delay })
+            .catch(e => console.error(`${prefix} Command failed:`, e));
     }
 
     let lastProcessedText = "";
@@ -422,6 +503,10 @@ function registerParserHook(lovenseClient) {
         const { chat } = stContext;
         const message = chat[chatIndex];
         if (!message || message.is_user) return;
+
+        // Only act on messages produced by a live generation. Re-rendering history (chat load, swipes
+        // browsing) must never replay old haptic commands.
+        if (!generationInFlight && Date.now() > generationGraceUntil) return;
 
         if (message.mes === lastProcessedText) {
             return;
@@ -479,29 +564,142 @@ function registerParserHook(lovenseClient) {
         }
     }
 
-    // Register listeners for rendered and received bot messages
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (chatIndex) => {
+    // Redacted-secret handling must run BEFORE processMessage so lastProcessedText sees the final text.
+    function convertRedactedInChat(chatIndex) {
+        if (!settings.enableHapticUnlock) return;
+        const message = stContext.chat[chatIndex];
+        if (!message || message.is_user || typeof message.mes !== 'string') return;
+        const { text, count } = convertRedactedTags(message.mes);
+        if (count > 0) {
+            message.mes = text;
+            console.log(`[Lovense] Converted ${count} <redacted> secret(s) in message ${chatIndex}`);
+        }
+    }
+
+    eventSource.on(event_types.MESSAGE_RECEIVED, (chatIndex) => {
+        convertRedactedInChat(chatIndex);
         processMessage(chatIndex);
     });
 
-    eventSource.on(event_types.MESSAGE_RECEIVED, (chatIndex) => {
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (chatIndex) => {
         processMessage(chatIndex);
+        enhanceRedactedInMessage(chatIndex);
     });
 
     // Clear command queue when new generation starts
     eventSource.on(event_types.GENERATION_STARTED, () => {
+        generationInFlight = true;
         messageCommands = [];
         console.log('[Lovense] Generation started - cleared command queue');
     });
 
-    // Start looping when generation completes — only if loop=true commands exist
+    const onGenerationFinished = () => {
+        generationInFlight = false;
+        generationGraceUntil = Date.now() + 3000;
+    };
+    if (event_types.GENERATION_STOPPED) eventSource.on(event_types.GENERATION_STOPPED, onGenerationFinished);
+
+    // Start looping when generation completes — only if loop=true commands exist.
+    // NOTE: this must NOT send a device Stop for fire-once commands, or every command would be cut off
+    // the moment the reply finishes. A Stop is only sent if a previous loop was running and is now replaced.
     eventSource.on(event_types.GENERATION_ENDED, () => {
+        onGenerationFinished();
         const loopCount = messageCommands.filter(c => c.loop === true).length;
         console.log('[Lovense] Generation ended -', messageCommands.length, 'commands seen,', loopCount, 'loop=true');
-        stopLoopingCommands();
+        const wasLooping = isLooping;
+        clearLoopState();
         if (loopCount > 0) {
             startLoopingCommands();
+        } else if (wasLooping && client) {
+            client.sendCommand({ action: 'Stop', strength: 0, duration: 0 })
+                .catch(e => console.warn('[Lovense] Stop after loop failed:', e));
         }
+    });
+
+    // A delayed command must never leak into a different chat.
+    eventSource.on(event_types.CHAT_CHANGED, () => {
+        cancelPendingActivity();
+    });
+}
+
+/**
+ * Turn converted <span class="lovense-redacted"> placeholders into interactive locked secrets.
+ * Clicking starts the haptic cycle; the text is revealed only when the full cycle completes.
+ * The user can stop the cycle at any time, which re-locks the text.
+ */
+function enhanceRedactedInMessage(chatIndex) {
+    if (!settings.enableHapticUnlock) return;
+    const root = document.querySelector(`#chat .mes[mesid="${chatIndex}"] .mes_text`);
+    if (!root) return;
+
+    root.querySelectorAll('.lovense-redacted[data-lovense-unlock]:not([data-lovense-ready])').forEach(wrapper => {
+        wrapper.setAttribute('data-lovense-ready', '1');
+        const textEl = wrapper.querySelector('.lovense-redacted-text');
+        if (!textEl) return;
+
+        const action = wrapper.getAttribute('data-lovense-action') || 'Vibrate';
+        const strength = clampStrength(wrapper.getAttribute('data-lovense-strength'), 1);
+        const duration = clampDuration(wrapper.getAttribute('data-lovense-duration'), 30);
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'lovense-unlock-btn menu_button';
+        btn.textContent = '🔒 Begin Haptic Unlock Test';
+        wrapper.appendChild(document.createTextNode(' '));
+        wrapper.appendChild(btn);
+
+        const resetButton = () => {
+            btn.textContent = '🔒 Begin Haptic Unlock Test';
+            btn.classList.remove('lovense-unlock-running');
+        };
+
+        let session = null;
+        const newSession = () => createUnlockSession({
+            duration,
+            start: async () => {
+                const res = await dispatchCommand({ action, strength, duration });
+                if (!(res?.code === 200 || res?.result === true)) {
+                    throw new Error(res?.message || `device returned code ${res?.code}`);
+                }
+            },
+            stop: () => {
+                client.sendCommand({ action: 'Stop', strength: 0, duration: 0 })
+                    .catch(e => console.warn('[Lovense] Stop on unlock abort failed:', e));
+            },
+            onTick: n => {
+                btn.textContent = `⏳ ${n}s — tap to stop`;
+            },
+            onDone: () => {
+                activeUnlocks.delete(abortFn);
+                textEl.classList.remove('lovense-redacted-blur');
+                textEl.classList.add('lovense-unlocked-text');
+                btn.remove();
+            },
+            onAbort: () => {
+                activeUnlocks.delete(abortFn);
+                resetButton();
+                session = null;
+            },
+            onError: e => {
+                activeUnlocks.delete(abortFn);
+                resetButton();
+                session = null;
+                window.toastr.error(`Haptic unlock failed to start: ${e.message || e}`, 'Lovense');
+            },
+        });
+        const abortFn = () => session?.abort();
+
+        btn.addEventListener('click', () => {
+            if (session && (session.state === 'running' || session.state === 'starting')) {
+                session.abort(); // second tap = stop and re-lock
+                return;
+            }
+            session = newSession();
+            activeUnlocks.add(abortFn);
+            btn.classList.add('lovense-unlock-running');
+            btn.textContent = '⏳ Starting… tap to stop';
+            session.begin();
+        });
     });
 }
 
@@ -562,6 +760,19 @@ async function updateUI() {
         saveSettingsDebounced();
     });
 
+    window.$('#lovense_allowDelayedCommands').on('change', (e) => {
+        settings.allowDelayedCommands = e.target.checked;
+        if (!settings.allowDelayedCommands) cancelPendingActivity();
+        updateLovensePrompt();
+        saveSettingsDebounced();
+    });
+
+    window.$('#lovense_enableHapticUnlock').on('change', (e) => {
+        settings.enableHapticUnlock = e.target.checked;
+        updateLovensePrompt();
+        saveSettingsDebounced();
+    });
+
     window.$('#lovense_customGuidelines').on('input', (e) => {
         settings.customGuidelines = e.target.value;
         updateLovensePrompt();
@@ -600,9 +811,8 @@ async function updateUI() {
     });
 
     window.$('#lovense_stop_all').on('click', () => {
-        stopLoopingCommands();
-        messageCommands = [];
-        window.toastr.success('All toys stopped and loop cleared.', 'Lovense');
+        stopEverything();
+        window.toastr.success('All toys stopped; loops, delayed commands and unlocks cleared.', 'Lovense');
     });
 
     toggleSettingsVisibility();
@@ -621,17 +831,20 @@ function registerLovenseSlashCommands() {
         name: 'lovense',
         helpString: 'Control Lovense toy (fire-once; add loop=true to repeat until stopped)',
         callback: async (namedArgs, unnamedArgs) => {
-            const argsArray = Array.isArray(unnamedArgs) ? unnamedArgs : [unnamedArgs];
-            const action = String(argsArray[0] || '');
-            // Ferri safety: default 1 (tame), HARD CAP 3.
-            const strength = Math.min(Math.max(argsArray[1] ? Number(argsArray[1]) : 1, 0), 3);
-            const duration = argsArray[2] ? Number(argsArray[2]) : 5;
-            const loop = String(argsArray[3] || '').toLowerCase() === 'true';
+            // SillyTavern may hand us one string ("Vibrate 2 5") or an array depending on version.
+            const parts = Array.isArray(unnamedArgs)
+                ? unnamedArgs.map(String)
+                : String(unnamedArgs ?? '').trim().split(/\s+/).filter(Boolean);
+            const action = String(parts[0] || '');
             if (!action) return 'Usage: /lovense [action] [strength 0-3] [duration] [loop=true]';
+            // Ferri safety: default 1 (tame), HARD CAP 3.
+            const strength = clampStrength(parts[1], 1);
+            const duration = clampDuration(parts[2], 5);
+            const loop = String(parts[3] || '').toLowerCase() === 'true';
             try {
-                await client.sendCommand({ action, strength, duration: duration || 5 });
+                await dispatchCommand({ action, strength, duration });
                 if (loop && action.toLowerCase() !== 'stop') {
-                    messageCommands.push({ action, strength, duration: duration || 5, toyId: null, loop: true });
+                    messageCommands.push({ action, strength, duration, toyId: null, loop: true });
                     startLoopingCommands();
                     return `Lovense: ${action} @ ${strength} looping until /lovense-stop.`;
                 }
@@ -653,9 +866,8 @@ function registerLovenseSlashCommands() {
         helpString: 'Stop all Lovense toys and clear command loop',
         callback: async () => {
             try {
-                stopLoopingCommands();
-                messageCommands = [];
-                return 'Lovense: All toys stopped and loop cleared.';
+                stopEverything();
+                return 'Lovense: All toys stopped; loops, delayed commands and unlocks cleared.';
             } catch (e) {
                 return `Lovense Error: ${e.message}`;
             }
@@ -672,7 +884,7 @@ function registerLovenseTools() {
     registerFunctionTool({
         name: 'control_lovense_toy',
         displayName: 'Control Lovense Toy',
-        description: 'Trigger, adjust, or stop gentle haptic feedback on the user\'s Ferri WHILE you narrate the scene in prose. Fires ONCE by default — only set loop=true if the user explicitly asked for continuous play. Always write in-character text alongside the call (never call with empty text), then continue the scene after the result. Keep strength 0-3 (default 1), stop immediately on any stop cue.',
+        description: 'Trigger, adjust, or stop gentle haptic feedback on the user\'s Ferri WHILE you narrate the scene in prose. Fires ONCE by default — only set loop=true if the user explicitly asked for continuous play. Always write in-character text alongside the call (never call with empty text), then continue the scene after the result. Keep strength 0-3 (default 1), stop immediately on any stop cue. Optional delay (seconds) schedules the command for later, but is only honoured if the user enabled delayed commands.',
         parameters: {
             type: 'object',
             properties: {
@@ -693,41 +905,47 @@ function registerLovenseTools() {
                     type: 'boolean',
                     description: 'Set true ONLY if the user asked for continuous/repeating stimulation (e.g. "keep it going"). Default false = fire once and stop.'
                 },
+                delay: {
+                    type: 'integer',
+                    description: 'Optional delay in seconds (0-300) before the command fires. Ignored unless the user enabled delayed commands. Any Stop cancels pending delayed commands.'
+                },
                 toyId: {
                     type: 'string',
-                    description: 'Optional. The ID of the connected Ferri device: "mock-ferri-001".'
+                    description: 'Optional. ID of a specific connected toy (omit to target all toys).'
                 }
             },
             required: ['action', 'strength', 'duration']
         },
-        action: async ({ action, strength, duration, loop, toyId }) => {
-            // Ferri safety: HARD CAP 3 for ALL actions (was 20, Pump-only 3).
-            let sanitizedStrength = Math.min(Math.max(strength ?? 1, 0), 3);
+        action: async ({ action, strength, duration, loop, delay, toyId }) => {
+            // Ferri safety: HARD CAP 3 for ALL actions.
+            const sanitizedStrength = clampStrength(strength, 1);
+            const finalDuration = clampDuration(duration, 5);
+            const finalDelay = clampDelay(delay);
+            const wantLoop = loop === true && finalDelay === 0;
 
-            let finalDuration = duration === 0 ? 60 : Math.min(Math.max(duration ?? 5, 1), 60);
-            const wantLoop = loop === true;
-
-            // Track for post-generation replay ONLY if loop=true (B).
-            messageCommands.push({ action, strength: sanitizedStrength, duration: finalDuration, toyId, loop: wantLoop });
+            // Track for post-generation replay ONLY if loop=true. Delayed commands never loop.
+            if (finalDelay === 0) {
+                messageCommands.push({ action, strength: sanitizedStrength, duration: finalDuration, toyId, loop: wantLoop });
+            }
 
             if (isMock) {
-                console.log(`[Lovense Mock Tool] action=${action}, strength=${sanitizedStrength}, duration=${finalDuration}s, loop=${wantLoop}, toyId=${toyId || 'all'}`);
+                console.log(`[Lovense Mock Tool] action=${action}, strength=${sanitizedStrength}, duration=${finalDuration}s, loop=${wantLoop}, delay=${finalDelay}s, toyId=${toyId || 'all'}`);
                 window.toastr.info(
-                    `${action} @ Lvl ${sanitizedStrength} for ${finalDuration}s${wantLoop ? ' (loop)' : ''}`,
+                    `${action} @ Lvl ${sanitizedStrength} for ${finalDuration}s${wantLoop ? ' (loop)' : ''}${finalDelay ? ` in ${finalDelay}s` : ''}`,
                     'Lovense Mock (Tool Call)',
                 );
             }
 
             try {
-                const response = await client.sendCommand({ action, strength: sanitizedStrength, duration: finalDuration, toyId });
+                const response = await dispatchCommand({ action, strength: sanitizedStrength, duration: finalDuration, toyId, delay: finalDelay });
                 return handleToolResponse(response);
             } catch (error) {
                 return JSON.stringify({ status: "error", message: error.message });
             }
         },
-        formatMessage: ({ action, strength, loop }) => {
+        formatMessage: ({ action, strength, loop, delay }) => {
             const prefix = isMock ? '[Lovense Mock]' : '[Lovense]';
-            return `${prefix} Sending ${action} (Lvl ${strength})${loop ? ' looping' : ''}...`;
+            return `${prefix} Sending ${action} (Lvl ${strength})${loop ? ' looping' : ''}${delay ? ` in ${delay}s` : ''}...`;
         },
         stealth: false
     });

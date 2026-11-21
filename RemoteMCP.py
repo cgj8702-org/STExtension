@@ -6,6 +6,7 @@
 #   LOCAL_DOMAIN=127-0-0-1.lovense.club LOCAL_PORT=30010
 #   DEVELOPER_TOKEN=... USER_ID=...                   (server)
 #   VERIFY_SSL=false                                   (local self-signed cert)
+#   ALLOW_DELAYED_COMMANDS=true                        (opt-in: honour the 'delay' argument)
 #   MCP_TRANSPORT=stdio|sse MCP_HOST=127.0.0.1 MCP_PORT=8000
 import asyncio
 import logging
@@ -29,6 +30,40 @@ from lovense_client import LovenseClient, convert_ip_to_domain
 
 mcp = FastMCP("RemoteMCP")
 client = None
+
+MAX_DELAY = 300  # seconds
+MAX_PENDING = 3  # delayed commands allowed in flight at once
+ALLOW_DELAYED = False  # opt-in, set from ALLOW_DELAYED_COMMANDS at startup
+_pending = set()  # asyncio.Tasks for scheduled (delayed) commands
+
+
+def _clamp_delay(value):
+    try:
+        d = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return min(max(d, 0), MAX_DELAY)
+
+
+def _cancel_pending():
+    """Cancel every scheduled command. Returns how many were cancelled."""
+    n = 0
+    for task in list(_pending):
+        if not task.done():
+            task.cancel()
+            n += 1
+    _pending.clear()
+    return n
+
+
+async def _run_delayed(delay, send):
+    try:
+        await asyncio.sleep(delay)
+        await asyncio.to_thread(send)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Delayed command failed")
 
 
 def parse_args_from_argv():
@@ -83,32 +118,53 @@ def _require_client():
     return client
 
 
+def _result_ok(result):
+    resp = result.get("response", result) if isinstance(result, dict) else result
+    code = resp.get("code") if isinstance(resp, dict) else None
+    return code in (200, 0, None) or (isinstance(resp, dict) and resp.get("result") in (True, "true"))
+
+
 @mcp.tool()
-def control_lovense_toy(action: str = "Vibrate", strength: int = 1, duration: int = 5, toy_id: str = "", loop: bool = False, delay: int = 0) -> dict:
+async def control_lovense_toy(action: str = "Vibrate", strength: int = 1, duration: int = 5, toy_id: str = "", loop: bool = False, delay: int = 0) -> dict:
     """Control the user's Lovense Ferri. Mirrors the SillyTavern 'control_lovense_toy' tool.
 
     Args:
         action: Vibrate, Rotate, Pump, Thrusting, Fingering, Suction, Oscillate,
             Pulse, Wave, Fireworks, Earthquake, or Stop. 'random' maps to Vibrate.
+            Stop also cancels every pending delayed command.
         strength: Ferri 0-3 ONLY (0=stop, 1=gentle default, 2=moderate, 3=MAX — even 4 is too much). Clamped.
         duration: seconds 1-60. 0 means hold -> 60s.
         toy_id: optional toy ID (omit for all toys).
-        loop: fire-once by default; true replays until Stop (use sparingly).
-        delay: optional seconds 0-300 to wait before firing (haptic landmine).
+        loop: accepted for parity with the extension; this server never loops.
+        delay: optional seconds 0-300 to wait before firing. Only honoured when the
+            server was started with ALLOW_DELAYED_COMMANDS=true (max 3 pending).
     """
     try:
         c = _require_client()
-        if delay and int(delay) > 0:
-            d = min(max(int(delay), 0), 300)
-            logger.info("Delaying command %ss: %s %s %ss", d, action, strength, duration)
-            import time as _t
-            _t.sleep(d)
-        # run sync requests in a thread so we never block the MCP loop
-        result = c.send_command(action, strength, duration, toy_id or None)
-        resp = result.get("response", result) if isinstance(result, dict) else result
-        code = resp.get("code") if isinstance(resp, dict) else None
-        ok = code in (200, 0, None) or (isinstance(resp, dict) and resp.get("result") in (True, "true"))
-        return {"success": bool(ok), "message": "Sent %s strength %s for %ss%s" % (action, strength, duration, (" to " + toy_id) if toy_id else ""), "detail": result}
+        tid = toy_id or None
+
+        if str(action).strip().lower() == "stop":
+            cancelled = _cancel_pending()
+            result = await asyncio.to_thread(c.stop_all, tid)
+            return {"success": True, "message": "Stopped (cancelled %d pending delayed command(s))" % cancelled, "detail": result}
+
+        d = _clamp_delay(delay)
+        if d > 0 and not ALLOW_DELAYED:
+            logger.warning("delay=%s requested but ALLOW_DELAYED_COMMANDS is off - firing immediately", d)
+            d = 0
+
+        if d > 0:
+            if len([t for t in _pending if not t.done()]) >= MAX_PENDING:
+                return {"success": False, "message": "Too many delayed commands pending (max %d)." % MAX_PENDING}
+            task = asyncio.create_task(_run_delayed(d, lambda: c.send_command(action, strength, duration, tid)))
+            _pending.add(task)
+            task.add_done_callback(_pending.discard)
+            logger.info("Scheduled %s strength=%s for %ss in %ss", action, strength, duration, d)
+            return {"success": True, "scheduled": True, "delay": d, "message": "Scheduled %s in %ss" % (action, d)}
+
+        # requests is synchronous: run it in a thread so the MCP event loop is never blocked
+        result = await asyncio.to_thread(c.send_command, action, strength, duration, tid)
+        return {"success": bool(_result_ok(result)), "message": "Sent %s strength %s for %ss%s" % (action, strength, duration, (" to " + toy_id) if toy_id else ""), "detail": result}
     except Exception as e:
         logger.exception("control_lovense_toy failed")
         return {"success": False, "message": str(e)}
@@ -130,11 +186,12 @@ def SendFunctions(python_expression: str = "Vibrate:2", duration: int = 2, toy_i
 
 
 @mcp.tool()
-def SendStopFunction(toy_id: str = "") -> dict:
-    """Stop all actions currently running."""
+async def SendStopFunction(toy_id: str = "") -> dict:
+    """Stop all actions currently running and cancel any pending delayed commands."""
     try:
-        result = _require_client().stop_all(toy_id or None)
-        return {"success": True, "message": "Stopped all toy functions", "detail": result}
+        cancelled = _cancel_pending()
+        result = await asyncio.to_thread(_require_client().stop_all, toy_id or None)
+        return {"success": True, "message": "Stopped all toy functions (cancelled %d pending)" % cancelled, "detail": result}
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -171,6 +228,8 @@ def get_status() -> dict:
 if __name__ == "__main__":
     cli = parse_args_from_argv()
     client = build_client()
+    ALLOW_DELAYED = (_get(cli, "ALLOW_DELAYED_COMMANDS", "false") or "false").lower() in ("1", "true", "yes", "on")
+    logger.info("Delayed commands: %s", "enabled" if ALLOW_DELAYED else "disabled")
     transport = (_get(cli, "MCP_TRANSPORT", "stdio") or "stdio").lower()
     logger.info("RemoteMCP starting transport=%s", transport)
     if transport in ("sse", "streamable-http", "http"):

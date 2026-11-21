@@ -32,7 +32,7 @@
                     placeholder="127-0-0-1.lovense.club" />
             </div>
 
-            <div id="lovense_server_settings" class="settings-group {{#if (eq connectionMode 'local')}}hidden{{/if}}">
+            <div id="lovense_server_settings" class="settings-group {{#unless (eq connectionMode 'server')}}hidden{{/unless}}">
                 <label for="lovense_developerToken">
                     <span data-i18n="Developer Token">Developer Token</span>
                 </label>
@@ -57,6 +57,21 @@
                     <p><small>Commands are logged to the browser console (F12) and shown as toast notifications.</small>
                     </p>
                 </div>
+            </div>
+
+            <div class="settings-group lovense-optin-group">
+                <label class="checkbox_label" for="lovense_allowDelayedCommands">
+                    <input id="lovense_allowDelayedCommands" type="checkbox" {{#if allowDelayedCommands}}checked{{/if}} />
+                    <span data-i18n="Allow delayed commands">Allow delayed commands</span>
+                </label>
+                <small>Lets the AI schedule a command up to 5 minutes ahead (max 3 pending). Strength stays capped at 3, and Stop / Stop All / changing chats cancels everything pending.
+                    Pending now: <span id="lovense_pending_count">0</span></small>
+
+                <label class="checkbox_label" for="lovense_enableHapticUnlock">
+                    <input id="lovense_enableHapticUnlock" type="checkbox" {{#if enableHapticUnlock}}checked{{/if}} />
+                    <span data-i18n="Enable haptic unlock secrets">Enable haptic unlock secrets</span>
+                </label>
+                <small>Lets the AI hide text in &lt;redacted&gt; tags. It stays blurred until you tap the button and the toy completes the cycle. You can tap again at any time to stop and re-lock it.</small>
             </div>
 
             <div class="settings-group" style="margin-top: 10px;">

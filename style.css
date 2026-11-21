@@ -46,3 +46,44 @@
     margin: 4px 0 0;
     line-height: 1.4;
 }
+
+/* Opt-in feature toggles */
+.lovense-integration-settings .lovense-optin-group .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.lovense-integration-settings .lovense-optin-group input[type="checkbox"] {
+    width: auto;
+}
+
+/* Haptic unlock: redacted secrets in chat messages */
+.lovense-redacted-blur {
+    filter: blur(6px);
+    user-select: none;
+    transition: filter 0.8s ease;
+}
+
+.lovense-unlocked-text {
+    filter: none;
+    animation: lovense-unlock-reveal 1.2s ease-out;
+}
+
+@keyframes lovense-unlock-reveal {
+    from { filter: blur(6px); opacity: 0.4; }
+    to { filter: blur(0); opacity: 1; }
+}
+
+.lovense-unlock-btn {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 2px 10px;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+
+.lovense-unlock-btn.lovense-unlock-running {
+    opacity: 0.85;
+    border-color: #d9534f;
+}
