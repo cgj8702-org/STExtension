@@ -1,17 +1,24 @@
-# UI Extensions    Copy
+---
+order: -20
+icon: file-added
+templating: false
+route: /for-contributors/writing-extensions/
+---
+
+# UI Extensions
 
 UI extensions expand SillyTavern's functionality by hooking into its events and API. They run in a browser context and have practically unrestricted access to the DOM, JavaScript APIs, and the SillyTavern context. Extensions can modify the UI, call internal APIs, and interact with chat data. This guide explains how to create your own extensions (JavaScript knowledge is required).
 
-##### Just want to install extensions?
+!!!tip Just want to install extensions?
+Go here: [Extensions](../extensions/index.md).
+!!!
 
-Go here: [Extensions](https://docs.sillytavern.app/extensions/).
-
-To extend the functionality of the Node.js server, see the [Server Plugins](https://docs.sillytavern.app/for-contributors/server-plugins/) page.
+To extend the functionality of the Node.js server, see the [Server Plugins](./Server-Plugins.md) page.
 
 **Can't write JavaScript?**
 
-- Consider [STscript](https://docs.sillytavern.app/usage/st-script/) as a simpler alternative to writing a full-fledged extension.
-- Go through the [MDN Course](https://developer.mozilla.org/en-US/docs/Learn/JavaScript) and come back when you're done.
+* Consider [STscript](./st-script.md) as a simpler alternative to writing a full-fledged extension.
+* Go through the [MDN Course](https://developer.mozilla.org/en-US/docs/Learn/JavaScript) and come back when you're done.
 
 ## Extension submissions
 
@@ -28,20 +35,20 @@ To ensure that all extensions are safe and easy to use, we have a few requiremen
 
 See live examples of simple SillyTavern extensions:
 
-- [https://github.com/city-unit/st-extension-example](https://github.com/city-unit/st-extension-example) \- basic extension template. Showcases manifest creation, local script imports, adding a settings UI panel, and persistent extension settings usage.
-- [https://github.com/search?q=topic%3Aextension+org%3ASillyTavern&type=Repositories](https://github.com/search?q=topic%3Aextension+org%3ASillyTavern&type=Repositories) \- a list of all official SillyTavern extensions on GitHub.
+* <https://github.com/city-unit/st-extension-example> - basic extension template. Showcases manifest creation, local script imports, adding a settings UI panel, and persistent extension settings usage.
+* <https://github.com/SillyTavern/Extension-ProviderExample> - example of an extension that adds a named provider to the Chat Completion source list. See [Build a provider extension](Provider-Integrations#option-1-build-a-provider-extension).
+* <https://github.com/search?q=topic%3Aextension+org%3ASillyTavern&type=Repositories> - a list of all official SillyTavern extensions on GitHub.
 
 ## Bundling
 
 Extensions can also utilize bundling to isolate themselves from the rest of the modules and use any dependencies from NPM, including UI frameworks like Vue, React, etc.
 
-- [https://github.com/SillyTavern/Extension-WebpackTemplate](https://github.com/SillyTavern/Extension-WebpackTemplate) \- template repository of an extension using TypeScript and Webpack (no React).
-- [https://github.com/SillyTavern/Extension-ReactTemplate](https://github.com/SillyTavern/Extension-ReactTemplate) \- template repository of a bare-bones extension using React and Webpack.
+* <https://github.com/SillyTavern/Extension-WebpackTemplate> - template repository of an extension using TypeScript and Webpack (no React).
+* <https://github.com/SillyTavern/Extension-ReactTemplate> - template repository of a bare-bones extension using React and Webpack.
 
 To use relative imports from the bundle, you may need to create an import wrapper. Here's an example for Webpack:
 
-```javascript
-
+```js
 /**
  * Import a member from a module by URL, bypassing webpack.
  * @param {string} url URL to import from
@@ -73,7 +80,6 @@ Every extension must have a folder in `data/<user-handle>/extensions` and a `man
 Downloadable extensions are mounted into the `/scripts/extensions/third-party` folder when serving over HTTP, so relative imports should be used based on that. To ease local development, consider placing your extension repository in the `/scripts/extensions/third-party` folder (the "Install for all users" option).
 
 ```json
-
 {
     "display_name": "The name of the extension",
     "loading_order": 1,
@@ -103,17 +109,17 @@ Downloadable extensions are mounted into the `/scripts/extensions/third-party` f
 
 ### Manifest fields
 
-- `display_name` is required. It is displayed in the "Manage Extensions" menu.
-- `loading_order` is optional. A higher number loads later.
-- `js` is the main JS file reference and is required.
-- `css` is an optional style file reference.
-- `author` is required. It should contain the name or contact info of the author(s).
-- `auto_update` is set to `true` if the extension should auto-update when the version of the ST package changes.
-- `i18n` is an optional object that specifies the supported locales and their corresponding JSON files (see below).
-- `dependencies` is an optional array of strings specifying other **extensions** that this extension depends on.
-- `generate_interceptor` is an optional string that specifies the name of a global function called on text generation requests.
-- `minimum_client_version` is an optional string that specifies the minimum SillyTavern version required for this extension to work.
-- `hooks` is an optional object that specifies [lifecycle hook](https://docs.sillytavern.app/for-contributors/writing-extensions/#lifecycle-hooks) function names exported from the JS entry point module.
+* `display_name` is required. It is displayed in the "Manage Extensions" menu.
+* `loading_order` is optional. A higher number loads later.
+* `js` is the main JS file reference and is required.
+* `css` is an optional style file reference.
+* `author` is required. It should contain the name or contact info of the author(s).
+* `auto_update` is set to `true` if the extension should auto-update when the version of the ST package changes.
+* `i18n` is an optional object that specifies the supported locales and their corresponding JSON files (see below).
+* `dependencies` is an optional array of strings specifying other **extensions** that this extension depends on.
+* `generate_interceptor` is an optional string that specifies the name of a global function called on text generation requests.
+* `minimum_client_version` is an optional string that specifies the minimum SillyTavern version required for this extension to work.
+* `hooks` is an optional object that specifies [lifecycle hook](#lifecycle-hooks) function names exported from the JS entry point module.
 
 ### Dependencies
 
@@ -123,30 +129,30 @@ Dependencies are specified by their **folder name** as it appears in the `public
 
 Examples:
 
-- Built-in extensions: `"vectors"`, `"caption"`
-- Third-party extensions: `"third-party/Extension-WebLLM"`, `"third-party/Extension-Mermaid"`
+* Built-in extensions: `"vectors"`, `"caption"`
+* Third-party extensions: `"third-party/Extension-WebLLM"`, `"third-party/Extension-Mermaid"`
 
 ### Deprecated fields
 
-- `requires` is an optional array of strings specifying required **Extras modules**. The extension won't be loaded if the connected Extras API doesn't provide all listed modules.
-- `optional` is an optional array of strings specifying optional **Extras modules**. The extension will still load if these are missing, and the extension should handle their absence gracefully.
+* `requires` is an optional array of strings specifying required **Extras modules**. The extension won't be loaded if the connected Extras API doesn't provide all listed modules.
+* `optional` is an optional array of strings specifying optional **Extras modules**. The extension will still load if these are missing, and the extension should handle their absence gracefully.
 
 To check which modules are currently provided by the connected Extras API, import the `modules` array from `scripts/extensions.js`.
+
 
 ## Scripting
 
 ### Best practices for extension initialization
 
-- Use the `activate` hook for synchronous setup that needs to run during SillyTavern's loading phase while the blocking loader is active.
-- Use the `APP_INITIALIZED` event for setup that should run after all extensions and UI elements are loaded and set up, but while the loader is still blocking.
-- Use the `APP_READY` event for asynchronous setup that doesn't need to block SillyTavern from being ready to use. It should use a timer or similar mechanism to defer handling, as the event handler will be awaited.
+* Use the `activate` hook for synchronous setup that needs to run during SillyTavern's loading phase while the blocking loader is active.
+* Use the `APP_INITIALIZED` event for setup that should run after all extensions and UI elements are loaded and set up, but while the loader is still blocking.
+* Use the `APP_READY` event for asynchronous setup that doesn't need to block SillyTavern from being ready to use. It should use a timer or similar mechanism to defer handling, as the event handler will be awaited.
 
 ### Using getContext
 
 The `getContext()` function in the `SillyTavern` global object gives you access to the SillyTavern context, which is a collection of all the main app state objects, useful functions, and utilities.
 
-```javascript
-
+```js
 const context = SillyTavern.getContext();
 context.chat; // Chat log - MUTABLE
 context.characters; // Character list
@@ -158,41 +164,42 @@ context.groupId; // ID of the current group
 
 You can find the full list of available properties and functions in the [SillyTavern source code](https://github.com/SillyTavern/SillyTavern/blob/staging/public/scripts/st-context.js).
 
+!!!
 If you're missing any of the functions/properties in `getContext`, please get in touch with the developers or send us a pull request!
+!!!
 
 ### Shared libraries
 
 Most of the npm libraries used internally by the SillyTavern frontend are shared in the `libs` property of the `SillyTavern` global object.
 
-- `lodash` \- Utility library. [Docs](https://lodash.com/).
-- `Fuse` \- Fuzzy search library. [Docs](https://www.fusejs.io/).
-- `DOMPurify` \- HTML sanitization library. [Docs](https://github.com/cure53/DOMPurify).
-- `hljs` \- Syntax highlighting library. [Docs](https://highlightjs.org/).
-- `localforage` \- Browser storage library (IndexedDB/localStorage abstraction). [Docs](https://localforage.github.io/localForage/).
-- `Handlebars` \- Templating library. [Docs](https://handlebarsjs.com/).
-- `css` \- CSS parsing/stringification tools. [Docs](https://github.com/nicolo-ribaudo/css-tools).
-- `Bowser` \- Browser/platform detection library. [Docs](https://github.com/bowser-js/bowser).
-- `DiffMatchPatch` \- Text diff, match, and patch library. [Docs](https://github.com/google/diff-match-patch).
-- `Readability` / `isProbablyReaderable` \- Mozilla's article extraction library. [Docs](https://github.com/mozilla/readability).
-- `SVGInject` \- Inline SVG injection library. [Docs](https://github.com/nicolo-ribaudo/svg-inject).
-- `showdown` \- Markdown converter library. [Docs](https://showdownjs.com/).
-- `moment` \- Date/time manipulation library. [Docs](http://momentjs.com/).
-- `seedrandom` \- Seeded random number generator. [Docs](https://github.com/davidbau/seedrandom).
-- `Popper` \- Tooltip/popover positioning engine. [Docs](https://popper.js.org/).
-- `droll` \- Dice rolling library. [Docs](https://github.com/thebinarypenguin/droll).
-- `morphdom` \- Fast DOM diffing/patching library. [Docs](https://github.com/patrick-steele-iber/morphdom).
-- `slideToggle` \- Vanilla JS slide toggle animation. [Docs](https://github.com/nicolo-ribaudo/slidetoggle).
-- `chalk` \- Terminal string styling (limited use in browser). [Docs](https://github.com/chalk/chalk).
-- `yaml` \- YAML parser and stringifier. [Docs](https://eemeli.org/yaml/).
-- `chevrotain` \- Parser building toolkit. [Docs](https://chevrotain.io/).
-- `gzipSync` / `gzip` \- Fast compression utilities from fflate. [Docs](https://github.com/101arrowz/fflate).
+* `lodash` - Utility library. [Docs](https://lodash.com/).
+* `Fuse` - Fuzzy search library. [Docs](https://www.fusejs.io/).
+* `DOMPurify` - HTML sanitization library. [Docs](https://github.com/cure53/DOMPurify).
+* `hljs` - Syntax highlighting library. [Docs](https://highlightjs.org/).
+* `localforage` - Browser storage library (IndexedDB/localStorage abstraction). [Docs](https://localforage.github.io/localForage/).
+* `Handlebars` - Templating library. [Docs](https://handlebarsjs.com/).
+* `css` - CSS parsing/stringification tools. [Docs](https://github.com/nicolo-ribaudo/css-tools).
+* `Bowser` - Browser/platform detection library. [Docs](https://github.com/bowser-js/bowser).
+* `DiffMatchPatch` - Text diff, match, and patch library. [Docs](https://github.com/google/diff-match-patch).
+* `Readability` / `isProbablyReaderable` - Mozilla's article extraction library. [Docs](https://github.com/mozilla/readability).
+* `SVGInject` - Inline SVG injection library. [Docs](https://github.com/nicolo-ribaudo/svg-inject).
+* `showdown` - Markdown converter library. [Docs](https://showdownjs.com/).
+* `moment` - Date/time manipulation library. [Docs](http://momentjs.com/).
+* `seedrandom` - Seeded random number generator. [Docs](https://github.com/davidbau/seedrandom).
+* `Popper` - Tooltip/popover positioning engine. [Docs](https://popper.js.org/).
+* `droll` - Dice rolling library. [Docs](https://github.com/thebinarypenguin/droll).
+* `morphdom` - Fast DOM diffing/patching library. [Docs](https://github.com/patrick-steele-iber/morphdom).
+* `slideToggle` - Vanilla JS slide toggle animation. [Docs](https://github.com/nicolo-ribaudo/slidetoggle).
+* `chalk` - Terminal string styling (limited use in browser). [Docs](https://github.com/chalk/chalk).
+* `yaml` - YAML parser and stringifier. [Docs](https://eemeli.org/yaml/).
+* `chevrotain` - Parser building toolkit. [Docs](https://chevrotain.io/).
+* `gzipSync` / `gzip` - Fast compression utilities from fflate. [Docs](https://github.com/101arrowz/fflate).
 
 You can find the full list of exported libraries in the [SillyTavern source code](https://github.com/SillyTavern/SillyTavern/blob/staging/public/lib.js).
 
 **Example:** Using the DOMPurify library.
 
-```javascript
-
+```js
 const { DOMPurify } = SillyTavern.libs;
 
 const sanitizedHtml = DOMPurify.sanitize('<script>"dirty HTML"</script>');
@@ -202,10 +209,9 @@ const sanitizedHtml = DOMPurify.sanitize('<script>"dirty HTML"</script>');
 
 If you want access to autocomplete for all methods in the `SillyTavern` global object (and you probably do), including `getContext()` and `libs`, you should add a TypeScript `.d.ts` module declaration. This declaration should import global types from SillyTavern's source, depending on your extension's location. Below is an example that works for both installation types: "all users" and "current user."
 
-**global.d.ts** \- place this file in the root of your extension directory (next to `manifest.json`):
+**global.d.ts** - place this file in the root of your extension directory (next to `manifest.json`):
 
-```typescript
-
+```ts
 export {};
 
 // 1. Import for user-scoped extensions
@@ -225,8 +231,7 @@ Extensions can use Handlebars HTML templates to build their UI. Place `.html` te
 
 The function takes your extension's folder name, the template file name (without `.html`), and an optional data object for Handlebars template variables. The returned HTML is automatically sanitized with DOMPurify and localized with `data-i18n` attributes.
 
-```javascript
-
+```js
 const { renderExtensionTemplateAsync } = SillyTavern.getContext();
 
 // Renders 'third-party/my-extension/settings.html' with the given data
@@ -242,8 +247,7 @@ $('#extensions_settings2').append(settingsHtml);
 
 **Template file example** (`settings.html`):
 
-```markup
-
+```html
 <div class="my-extension-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
@@ -260,18 +264,21 @@ $('#extensions_settings2').append(settingsHtml);
 </div>
 ```
 
+!!!warning
 `renderExtensionTemplate()` (synchronous) is deprecated. Always use `renderExtensionTemplateAsync()` instead.
+!!!
 
 ### Importing from other files
 
+!!!warning
 Using imports from SillyTavern code is unreliable and can break at any time if the internal structure of ST's modules changes. `getContext` provides a more stable API.
+!!!
 
 Unless you're building a bundled extension, you can import variables and functions from other JS files.
 
 For example, this code snippet will generate a reply from the currently selected API in the background:
 
-```javascript
-
+```js
 import { generateQuietPrompt } from "../../../../script.js";
 
 async function handleMessage(data) {
@@ -289,8 +296,7 @@ When an extension needs to persist its state, it can use the `extensionSettings`
 
 To persist the settings, use the `saveSettingsDebounced()` function, which will save the settings to the server.
 
-```javascript
-
+```js
 const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
 
 // Define a unique identifier for your extension
@@ -334,10 +340,11 @@ To bind some data to a specific chat, you can use the `chatMetadata` object from
 
 To persist the metadata, use the `saveMetadata()` function, which will save the metadata to the server.
 
+!!!warning
 Do not save the reference to `chatMetadata` in a long-lived variable, as the reference will change when the chat is switched. Always use `SillyTavern.getContext().chatMetadata` to access the current chat metadata.
+!!!
 
-```javascript
-
+```js
 const { chatMetadata, saveMetadata } = SillyTavern.getContext();
 
 // Set some metadata for the current chat
@@ -350,7 +357,9 @@ const value = chatMetadata['my_key'];
 await saveMetadata();
 ```
 
-The `CHAT_CHANGED` event is emitted when the chat is switched, so you can listen to this event to update your extension's state accordingly. See more in the [Listening to events](https://docs.sillytavern.app/for-contributors/writing-extensions/#listening-to-events) section.
+!!!tip
+The `CHAT_CHANGED` event is emitted when the chat is switched, so you can listen to this event to update your extension's state accordingly. See more in the [Listening to events](#listening-to-events) section.
+!!!
 
 ### Character cards
 
@@ -360,16 +369,15 @@ This is useful for extensions that need to store additional data associated with
 
 To write data to the character card [extensions](https://github.com/malfoyslastname/character-card-spec-v2/blob/main/spec_v2.md#extensions) data field, use the `writeExtensionField` function from the `getContext()` function. This function takes a character ID, a string key, and a value to write. The value must be JSON-serializable.
 
-##### Weirdness Ahead
-
+!!!warning Weirdness Ahead
 Despite being called `characterId`, it's not a "real" unique identifier but rather an index of the character in the `characters` array.
 
 The index of the current character is provided by the `characterId` property in the context. If you want to write data to the currently selected character, use `SillyTavern.getContext().characterId`. If you need to store data for another character, find the index by searching for the character in the `characters` array.
 
 **Caution: `characterId` is `undefined` in group chats or when no character is selected!**
+!!!
 
-```javascript
-
+```js
 const { writeExtensionField, characterId } = SillyTavern.getContext();
 
 // Write some data to the character card
@@ -388,15 +396,14 @@ const myData = character.data?.extensions?.my_extension_key;
 
 Arbitrary JSON data can be stored in the settings presets of the main API types. It will be exported and imported along with the preset JSON, so you can use it to store extension-specific settings for the preset. The following API types support data extensions in settings presets:
 
-- Chat Completion
-- Text Completion
-- NovelAI
-- KoboldAI / AI Horde
+* Chat Completion
+* Text Completion
+* NovelAI
+* KoboldAI / AI Horde
 
 To read or write the data, you first need to get the PresetManager instance from the context:
 
-```javascript
-
+```js
 const { getPresetManager } = SillyTavern.getContext();
 
 // Get the preset manager for the current API type
@@ -414,22 +421,25 @@ await pm.writePresetExtensionField({ path: 'hello', value: 'world' });
 const value = pm.readPresetExtensionField({ path: 'hello' });
 ```
 
-The `PRESET_CHANGED` and `MAIN_API_CHANGED` events are emitted when the preset is changed or the main API is switched, so you can listen to these events to update your extension's state accordingly. See more in the [Listening to events](https://docs.sillytavern.app/for-contributors/writing-extensions/#listening-to-events) section.
+!!!tip
+The `PRESET_CHANGED` and `MAIN_API_CHANGED` events are emitted when the preset is changed or the main API is switched, so you can listen to these events to update your extension's state accordingly. See more in the [Listening to events](#listening-to-events) section.
+!!!
 
 ## Internationalization
 
-For general information on providing translations, see the [Internationalization](https://docs.sillytavern.app/for-contributors/i18n/) page.
+!!!
+For general information on providing translations, see the [Internationalization](/For_Contributors/i18n.md) page.
+!!!
 
 Extensions can provide additional localized strings for use with the `t`, `translate` functions and the `data-i18n` attribute in HTML templates.
 
-See the list of supported locales here (`lang` key): [https://github.com/SillyTavern/SillyTavern/blob/release/public/locales/lang.json](https://github.com/SillyTavern/SillyTavern/blob/release/public/locales/lang.json)
+See the list of supported locales here (`lang` key): <https://github.com/SillyTavern/SillyTavern/blob/release/public/locales/lang.json>
 
 ### Direct `addLocaleData` call
 
-Pass a locale code and an object with the translations to the `addLocaleData` function. Overrides of existing keys are _NOT_ allowed. If the passed locale code is not a currently chosen locale, the data will be silently ignored.
+Pass a locale code and an object with the translations to the `addLocaleData` function. Overrides of existing keys are *NOT* allowed. If the passed locale code is not a currently chosen locale, the data will be silently ignored.
 
-```javascript
-
+```js
 SillyTavern.getContext().addLocaleData('fr-fr', { 'Hello': 'Bonjour' });
 SillyTavern.getContext().addLocaleData('de-de', { 'Hello': 'Hallo' });
 ```
@@ -439,7 +449,6 @@ SillyTavern.getContext().addLocaleData('de-de', { 'Hello': 'Hallo' });
 Add an i18n object with a list of supported locales and their corresponding JSON file paths (relative to your extension's directory) to the manifest.
 
 ```json
-
 {
   "display_name": "Foobar",
   "js": "index.js",
@@ -456,7 +465,6 @@ Add an i18n object with a list of supported locales and their corresponding JSON
 While `registerSlashCommand` still exists for backward compatibility, new slash commands should now be registered through `SlashCommandParser.addCommandObject()` to provide extended details about the command and its parameters to the parser (and, in turn, to autocomplete and the command help).
 
 ```javascript
-
 SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'repeat',
     callback: (namedArgs, unnamedArgs) => {
         return Array(namedArgs.times ?? 5)
@@ -466,24 +474,24 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'repeat',
     },
     aliases: ['example-command'],
     returns: 'the repeated text',
-    namedArgumentList: [\
-        SlashCommandNamedArgument.fromProps({ name: 'times',\
-            description: 'number of times to repeat the text',\
-            typeList: ARGUMENT_TYPE.NUMBER,\
-            defaultValue: '5',\
-        }),\
-        SlashCommandNamedArgument.fromProps({ name: 'space',\
-            description: 'whether to separate the texts with a space',\
-            typeList: ARGUMENT_TYPE.BOOLEAN,\
-            defaultValue: 'off',\
-            enumList: ['on', 'off'],\
-        }),\
+    namedArgumentList: [
+        SlashCommandNamedArgument.fromProps({ name: 'times',
+            description: 'number of times to repeat the text',
+            typeList: ARGUMENT_TYPE.NUMBER,
+            defaultValue: '5',
+        }),
+        SlashCommandNamedArgument.fromProps({ name: 'space',
+            description: 'whether to separate the texts with a space',
+            typeList: ARGUMENT_TYPE.BOOLEAN,
+            defaultValue: 'off',
+            enumList: ['on', 'off'],
+        }),
     ],
-    unnamedArgumentList: [\
-        SlashCommandArgument.fromProps({ description: 'the text to repeat',\
-            typeList: ARGUMENT_TYPE.STRING,\
-            isRequired: true,\
-        }),\
+    unnamedArgumentList: [
+        SlashCommandArgument.fromProps({ description: 'the text to repeat',
+            typeList: ARGUMENT_TYPE.STRING,
+            isRequired: true,
+        }),
     ],
     helpString: `
         <div>
@@ -506,7 +514,7 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'repeat',
 }));
 ```
 
-All registered commands can be used in [STscript](https://docs.sillytavern.app/usage/st-script/) in any possible way.
+All registered commands can be used in [STscript](/For_Contributors/st-script.md) in any possible way.
 
 ## Events
 
@@ -514,8 +522,7 @@ All registered commands can be used in [STscript](https://docs.sillytavern.app/u
 
 Use `eventSource.on(eventType, eventHandler)` to listen for events:
 
-```javascript
-
+```js
 const { eventSource, event_types } = SillyTavern.getContext();
 
 eventSource.on(event_types.MESSAGE_RECEIVED, handleIncomingMessage);
@@ -529,84 +536,83 @@ The main event types are:
 
 **App lifecycle:**
 
-- `APP_INITIALIZED`: the app is initialized and close to being ready, but the loader is still visible. UI modifications can be done here. It will auto-fire every time a new listener is attached after the app is initialized.
-- `APP_READY`: the app is fully loaded and ready to use. It will auto-fire every time a new listener is attached after the app is ready.
+* `APP_INITIALIZED`: the app is initialized and close to being ready, but the loader is still visible. UI modifications can be done here. It will auto-fire every time a new listener is attached after the app is initialized.
+* `APP_READY`: the app is fully loaded and ready to use. It will auto-fire every time a new listener is attached after the app is ready.
 
 **Messages:**
 
-- `MESSAGE_SENT`: the message is sent by the user and recorded into the `chat` object but not yet rendered in the UI.
-- `MESSAGE_RECEIVED`: the LLM message is generated and recorded into the `chat` object but not yet rendered in the UI.
-- `USER_MESSAGE_RENDERED`: the message sent by a user is rendered in the UI.
-- `CHARACTER_MESSAGE_RENDERED`: the generated LLM message is rendered in the UI.
-- `MESSAGE_EDITED`: a message has been edited by the user.
-- `MESSAGE_DELETED`: a message has been deleted.
-- `MESSAGE_SWIPED`: a message swipe has been triggered.
-- `STREAM_TOKEN_RECEIVED`: a new token was received during streaming generation.
+* `MESSAGE_SENT`: the message is sent by the user and recorded into the `chat` object but not yet rendered in the UI.
+* `MESSAGE_RECEIVED`: the LLM message is generated and recorded into the `chat` object but not yet rendered in the UI.
+* `USER_MESSAGE_RENDERED`: the message sent by a user is rendered in the UI.
+* `CHARACTER_MESSAGE_RENDERED`: the generated LLM message is rendered in the UI.
+* `MESSAGE_EDITED`: a message has been edited by the user.
+* `MESSAGE_DELETED`: a message has been deleted.
+* `MESSAGE_SWIPED`: a message swipe has been triggered.
+* `STREAM_TOKEN_RECEIVED`: a new token was received during streaming generation.
 
 **Generation:**
 
-- `GENERATION_AFTER_COMMANDS`: the generation is about to start after processing slash commands.
-- `GENERATION_STARTED`: the generation has started.
-- `GENERATION_STOPPED`: the generation was stopped by the user.
-- `GENERATION_ENDED`: the generation has been completed or has errored out.
+* `GENERATION_AFTER_COMMANDS`: the generation is about to start after processing slash commands.
+* `GENERATION_STARTED`: the generation has started.
+* `GENERATION_STOPPED`: the generation was stopped by the user.
+* `GENERATION_ENDED`: the generation has been completed or has errored out.
 
 **Chat:**
 
-- `CHAT_CHANGED`: the chat has been switched (e.g., switched to another character, or another chat was loaded).
-- `CHAT_CREATED`: a new chat has been created.
-- `CHAT_DELETED`: a chat has been deleted.
+* `CHAT_CHANGED`: the chat has been switched (e.g., switched to another character, or another chat was loaded).
+* `CHAT_CREATED`: a new chat has been created.
+* `CHAT_DELETED`: a chat has been deleted.
 
 **Characters:**
 
-- `CHARACTER_EDITED`: a character's data has been changed.
-- `CHARACTER_DELETED`: a character has been deleted.
-- `CHARACTER_DUPLICATED`: a character has been duplicated.
+* `CHARACTER_EDITED`: a character's data has been changed.
+* `CHARACTER_DELETED`: a character has been deleted.
+* `CHARACTER_DUPLICATED`: a character has been duplicated.
 
 **Persona:**
 
-- `PERSONA_CHANGED`: the active persona has been changed.
-- `PERSONA_CREATED`: a new persona has been created.
-- `PERSONA_UPDATED`: a persona has been updated.
-- `PERSONA_RENAMED`: a persona has been renamed.
-- `PERSONA_DELETED`: a persona has been deleted.
+* `PERSONA_CHANGED`: the active persona has been changed.
+* `PERSONA_CREATED`: a new persona has been created.
+* `PERSONA_UPDATED`: a persona has been updated.
+* `PERSONA_RENAMED`: a persona has been renamed.
+* `PERSONA_DELETED`: a persona has been deleted.
 
 **Settings and presets:**
 
-- `SETTINGS_UPDATED`: the application settings have been updated.
-- `PRESET_CHANGED`: the active preset has been changed.
-- `MAIN_API_CHANGED`: the main API type has been switched.
-- `CHATCOMPLETION_SOURCE_CHANGED`: the chat completion source has changed.
-- `CHATCOMPLETION_MODEL_CHANGED`: the chat completion model has changed.
-- `CONNECTION_PROFILE_LOADED`: a connection profile has been loaded.
+* `SETTINGS_UPDATED`: the application settings have been updated.
+* `PRESET_CHANGED`: the active preset has been changed.
+* `MAIN_API_CHANGED`: the main API type has been switched.
+* `CHATCOMPLETION_SOURCE_CHANGED`: the chat completion source has changed.
+* `CHATCOMPLETION_MODEL_CHANGED`: the chat completion model has changed.
+* `CONNECTION_PROFILE_LOADED`: a connection profile has been loaded.
 
 **World Info:**
 
-- `WORLDINFO_UPDATED`: world info data has been updated.
-- `WORLDINFO_SETTINGS_UPDATED`: world info settings have been changed.
+* `WORLDINFO_UPDATED`: world info data has been updated.
+* `WORLDINFO_SETTINGS_UPDATED`: world info settings have been changed.
 
 **Tool calling:**
 
-- `TOOL_CALLS_PERFORMED`: tool calls have been executed.
-- `TOOL_CALLS_RENDERED`: tool call results have been rendered in the chat.
+* `TOOL_CALLS_PERFORMED`: tool calls have been executed.
+* `TOOL_CALLS_RENDERED`: tool call results have been rendered in the chat.
 
 **Text-to-Speech:**
 
-- `TTS_JOB_STARTED`: a TTS job has started.
-- `TTS_AUDIO_READY`: TTS audio data is ready to be played.
-- `TTS_JOB_COMPLETE`: a TTS job has been completed.
+* `TTS_JOB_STARTED`: a TTS job has started.
+* `TTS_AUDIO_READY`: TTS audio data is ready to be played.
+* `TTS_JOB_COMPLETE`: a TTS job has been completed.
 
 The full list of event types can be found [in the source](https://github.com/SillyTavern/SillyTavern/blob/staging/public/scripts/events.js).
 
-##### Event data
-
+!!!info Event data
 The way each event passes its data to the listener is not uniform. Some events don't emit any data; some pass an object or a primitive value. Please refer to the source code where the event is emitted to see what data it passes, or check with the debugger.
+!!!
 
 ### Emitting events
 
 You can produce any application events from extensions, including custom events, by calling `eventSource.emit(eventType, ...eventData)`:
 
-```javascript
-
+```js
 const { eventSource } = SillyTavern.getContext();
 
 // Can be a built-in event_types field or any string.
@@ -627,7 +633,6 @@ Interceptors from different extensions are run sequentially. The order is determ
 To define a prompt interceptor, add a `generate_interceptor` field to your extension's `manifest.json` file. The value should be the name of a global function that will be called by SillyTavern.
 
 ```json
-
 {
     "display_name": "My Interceptor Extension",
     "loading_order": 10, // Affects execution order
@@ -642,15 +647,14 @@ The `generate_interceptor` function is a global function that will be called upo
 
 The interceptor function receives the following arguments:
 
-- `chat`: An array of message objects representing the chat history that will be used for prompt building. You can modify this array directly (e.g., add, remove, or alter messages). Please note that messages are mutable, so any changes you make to the array will be reflected in the actual chat history. If you want the changes to be ephemeral, use `structuredClone` to create a deep copy of the message object.
-- `contextSize`: A number indicating the current context size (in tokens) calculated for the upcoming generation.
-- `abort`: A function that, when called, will signal to prevent the text generation from proceeding. It accepts a boolean parameter that prevents any subsequent interceptors from running if `true`.
-- `type`: A string indicating the type or trigger of the generation (e.g., `'quiet'`, `'regenerate'`, `'impersonate'`, `'swipe'`, etc.). This helps the interceptor apply logic conditionally based on how the generation was initiated.
+* `chat`: An array of message objects representing the chat history that will be used for prompt building. You can modify this array directly (e.g., add, remove, or alter messages). Please note that messages are mutable, so any changes you make to the array will be reflected in the actual chat history. If you want the changes to be ephemeral, use `structuredClone` to create a deep copy of the message object.
+* `contextSize`: A number indicating the current context size (in tokens) calculated for the upcoming generation.
+* `abort`: A function that, when called, will signal to prevent the text generation from proceeding. It accepts a boolean parameter that prevents any subsequent interceptors from running if `true`.
+* `type`: A string indicating the type or trigger of the generation (e.g., `'quiet'`, `'regenerate'`, `'impersonate'`, `'swipe'`, etc.). This helps the interceptor apply logic conditionally based on how the generation was initiated.
 
 **Example Implementation:**
 
 ```javascript
-
 globalThis.myCustomInterceptorFunction = async function(chat, contextSize, abort, type) {
     // Example: Add a system note before the last user message
     const systemNote = {
@@ -673,7 +677,7 @@ All hooks are optional. Hook functions can return a `Promise` that will be await
 ### Available hooks
 
 | Hook | When it's called |
-| --- | --- |
+|------|-----------------|
 | `activate` | When the extension is successfully activated during page load |
 | `install` | After the extension is installed and its settings are loaded |
 | `update` | After a successful extension update (before the reload toast) |
@@ -687,7 +691,6 @@ All hooks are optional. Hook functions can return a `Promise` that will be await
 Add a `hooks` object to your `manifest.json` mapping hook names to exported function names:
 
 ```json
-
 {
     "display_name": "My Extension",
     "js": "index.js",
@@ -704,16 +707,14 @@ Add a `hooks` object to your `manifest.json` mapping hook names to exported func
 }
 ```
 
-The names can be freely chosen, as long as the are valid JS function names.
-
+The names can be freely chosen, as long as the are valid JS function names.  
 Any numer of hooks can be configured, you do not have to fill out and implement all of them.
 
 ### Implementation
 
 Export the hook functions from your main JS entry point. Each function receives no arguments and can optionally return a `Promise`:
 
-```javascript
-
+```js
 // index.js - your extension's entry point
 
 export async function onInstall() {
@@ -751,7 +752,9 @@ export async function onClean() {
 }
 ```
 
+!!!warning
 Hook functions have a **5-second timeout**. If your hook takes longer, execution will continue and a warning will be logged. Keep hook logic fast and lightweight.
+!!!
 
 ## Generating text
 
@@ -761,8 +764,7 @@ SillyTavern provides several functions to generate text in different contexts us
 
 The `generateQuietPrompt()` function is used to generate text in the context of a chat with an added "quiet" prompt (post-history instruction) in the background (the output is not rendered in the UI). This is useful for generating text without interrupting the user experience while also keeping the relevant chat and character data intact, such as generating a summary or an image prompt.
 
-```javascript
-
+```js
 const { generateQuietPrompt } = SillyTavern.getContext();
 
 const quietPrompt = 'Generate a summary of the chat history.';
@@ -778,8 +780,7 @@ The `generateRaw()` function is used to generate text without any chat context. 
 
 It accepts a `prompt` as a Text Completion string or an array of Chat Completion objects, constructing the request with an appropriate format depending on the selected API type, e.g., converting between chat/text modes, applying instruct formatting, etc. You can also pass an additional `systemPrompt` and a `prefill` to the function for even more control over the generation process.
 
-```javascript
-
+```js
 const { generateRaw } = SillyTavern.getContext();
 
 const systemPrompt = 'You are a helpful assistant.';
@@ -788,10 +789,10 @@ const prefill = 'Once upon a time,';
 
 /*
 In Chat Completion mode, will produce a prompt like this:
-[\
-  {role: 'system', content: 'You are a helpful assistant.'},\
-  {role: 'user', content: 'Generate a story about a brave knight.'},\
-  {role: 'assistant', content: 'Once upon a time,'}\
+[
+  {role: 'system', content: 'You are a helpful assistant.'},
+  {role: 'user', content: 'Generate a story about a brave knight.'},
+  {role: 'assistant', content: 'Once upon a time,'}
 ]
 */
 
@@ -809,18 +810,21 @@ const result = await generateRaw({
 
 ### Structured Outputs
 
+!!!info
 Currently only supported by the Chat Completion API. The availability varies based on the selected source and model. If the selected model does not support structured outputs, the generation will either fail or will return an empty object (`'{}'`). Check the documentation for the specific API you are using to see if structured outputs are supported.
+!!!
 
 You can use the structured outputs feature to ensure the model produces a valid JSON object that adheres to a provided [JSON Schema](https://json-schema.org/learn). This is useful for extensions that require structured data, such as state tracking, data classification, etc.
 
 To use structured outputs, you must pass a JSON schema object to `generateRaw()` or `generateQuietPrompt()`. The model will then generate a response that matches the schema, and it will be returned as a stringified JSON object.
 
+!!!warning
 The outputs are not validated against the schema, you must handle the parsing and validation of the generated output yourself. If the model fails to generate a valid JSON object, the function will return an empty object (`'{}'`).
 
 [Zod](https://zod.dev/json-schema) is a popular library to generate and validate JSON schemas. Its use will not be covered here.
+!!!
 
-```javascript
-
+```js
 const { generateRaw, generateQuietPrompt } = SillyTavern.getContext();
 
 // Define a JSON schema for the expected output
@@ -846,10 +850,10 @@ const jsonSchema = {
                 'type': 'string'
             }
         },
-        'required': [\
-            'location',\
-            'plans',\
-            'memories'\
+        'required': [
+            'location',
+            'plans',
+            'memories'
         ],
     },
 };
@@ -875,8 +879,7 @@ You can register custom macros that can be used anywhere where macro substitutio
 
 The recommended way to register macros is through the `macros.register()` function available via `SillyTavern.getContext()`. This system supports arguments, categories, descriptions, and rich documentation metadata.
 
-```javascript
-
+```js
 const { macros } = SillyTavern.getContext();
 
 // Simple macro with a handler function
@@ -891,8 +894,8 @@ macros.register('tomorrow', {
 macros.register('greet', {
     description: 'Generates a greeting for the given name',
     category: macros.category.UTILITY,
-    unnamedArgs: [\
-        { name: 'name', description: 'The name to greet' },\
+    unnamedArgs: [
+        { name: 'name', description: 'The name to greet' },
     ],
     handler: ({ unnamedArgs }) => {
         const [name] = unnamedArgs;
@@ -903,11 +906,11 @@ macros.register('greet', {
 
 The `handler` function receives a [MacroExecutionContext](https://github.com/SillyTavern/SillyTavern/blob/staging/public/scripts/macros/engine/MacroRegistry.js) object containing
 
-- `args` \- All unnamed arguments passed to the macro.
-- `unnamedArgs` \- Positional arguments matching the defined argument list.
-- `list` \- List arguments (after unnamed args), or `null` if list is not enabled.
-- `env` \- The macro environment with access to character data, chat state, etc.
-- `resolve(text)` \- Function to resolve nested macros in text (when `delayArgResolution` is `true`).
+* `args` - All unnamed arguments passed to the macro.
+* `unnamedArgs` - Positional arguments matching the defined argument list.
+* `list` - List arguments (after unnamed args), or `null` if list is not enabled.
+* `env` - The macro environment with access to character data, chat state, etc.
+* `resolve(text)` - Function to resolve nested macros in text (when `delayArgResolution` is `true`).
 
 And more.
 
@@ -915,8 +918,7 @@ Handlers will run synchronously, so they can never return a `Promise` or call as
 
 To unregister a macro:
 
-```javascript
-
+```js
 const { macros } = SillyTavern.getContext();
 
 macros.registry.unregisterMacro('greet');
@@ -924,8 +926,7 @@ macros.registry.unregisterMacro('greet');
 
 You can also register aliases for existing macros:
 
-```javascript
-
+```js
 const { macros } = SillyTavern.getContext();
 
 macros.registerAlias('greet', 'hello', { visible: true });
@@ -933,12 +934,13 @@ macros.registerAlias('greet', 'hello', { visible: true });
 
 ### Legacy macro system (deprecated)
 
+!!!warning
 `registerMacro()` and `unregisterMacro()` from `getContext()` are **deprecated**. Use `macros.register()` and `macros.registry.unregisterMacro()` instead.
+!!!
 
 The legacy API is still available for backward compatibility, but will be removed in a future release:
 
-```javascript
-
+```js
 const { registerMacro, unregisterMacro } = SillyTavern.getContext();
 
 // Simple string macro
@@ -954,20 +956,22 @@ unregisterMacro('fizz');
 
 ## Message formatting hooks
 
-##### Staging Feature
-
+!!!warning Staging Feature
 This is currently only available on the `staging` branch of SillyTavern, and not part of the latest release.
+!!!
 
 Extensions can hook into the message formatting pipeline to transform message text before it reaches the DOM. This is useful for adding annotations (ruby tags, tooltips), highlighting, or custom text transformations.
 
+!!!warning
 Hooks run synchronously and **must return a string**. Async functions and non-string returns will throw a `TypeError` at registration time or be silently ignored at runtime with a console warning. Do not perform expensive operations in these hooks — they run on every message render.
+!!!
 
 ### Pipeline stages
 
 Hooks can be registered for three pipeline stages. All stages run **before** DOMPurify sanitization, so output is always safe:
 
 | Stage | When it runs | Text format |
-| --- | --- | --- |
+|-------|--------------|-------------|
 | `beforeRegex` | After prompt-bias stripping, before custom regex rules | Plain text |
 | `afterRegex` | After custom regex rules, before Markdown conversion | Plain text |
 | `afterMarkdown` | After Markdown-to-HTML conversion (showdown), before DOMPurify | HTML string |
@@ -978,8 +982,7 @@ The `afterMarkdown` stage is the default and the most common insertion point for
 
 Access the `messageFormatter` from `getContext()`:
 
-```javascript
-
+```js
 const { messageFormatter } = SillyTavern.getContext();
 
 // Simple hook - transforms message text
@@ -1006,7 +1009,7 @@ messageFormatter.addHook((mes, ctx) => {
 The hook receives an immutable context object with message metadata:
 
 | Property | Type | Description |
-| --- | --- | --- |
+|----------|------|-------------|
 | `characterName` | `string` | Character name associated with the message |
 | `isSystem` | `boolean` | Whether the message is a system message |
 | `isUser` | `boolean` | Whether the message was sent by the user |
@@ -1020,8 +1023,7 @@ The context object is frozen with `Object.freeze()` — attempting to modify it 
 
 Hooks within a stage run in ascending order. Use the `order` option to control execution order:
 
-```javascript
-
+```js
 const { hook_order } = messageFormatter;
 
 // Predefined constants
@@ -1047,15 +1049,15 @@ If a hook returns a non-string value (including `undefined` or a `Promise`), a c
 
 For reference, the complete message formatting pipeline is:
 
-01. Prompt-bias stripping (message 0 only)
-02. Comment / hidden-message normalization
-03. `beforeRegex` extension hooks
-04. Custom regex rules (`getRegexedString`)
-05. `afterRegex` extension hooks
-06. Markdown auto-fix (`fixMarkdown`)
-07. HTML tag encoding (`encode_tags`)
-08. Showdown Markdown → HTML conversion
-09. `afterMarkdown` extension hooks
+1. Prompt-bias stripping (message 0 only)
+2. Comment / hidden-message normalization
+3. `beforeRegex` extension hooks
+4. Custom regex rules (`getRegexedString`)
+5. `afterRegex` extension hooks
+6. Markdown auto-fix (`fixMarkdown`)
+7. HTML tag encoding (`encode_tags`)
+8. Showdown Markdown → HTML conversion
+9. `afterMarkdown` extension hooks
 10. Name-prefix stripping (`allow_name2_display`)
 11. DOMPurify sanitization
 
@@ -1065,12 +1067,11 @@ All extension hooks (steps 3, 5, 9) run **before** DOMPurify so their output is 
 
 Extensions can register custom function tools that the LLM can invoke during chat completion. This lets your extension react to structured data from the model — for example, querying APIs, performing calculations, or triggering extension features.
 
-For a full guide including prerequisites, supported APIs, registration fields, and tips, see the dedicated [Function Calling](https://docs.sillytavern.app/for-contributors/function-calling/) page.
+For a full guide including prerequisites, supported APIs, registration fields, and tips, see the dedicated [Function Calling](./Function-Calling.md) page.
 
 **Quick example:**
 
-```javascript
-
+```js
 const { registerFunctionTool } = SillyTavern.getContext();
 
 registerFunctionTool({
@@ -1098,8 +1099,7 @@ The action loader provides a loading overlay and toast notification system for l
 
 Access it via `loader` from `getContext()`:
 
-```javascript
-
+```js
 const { loader } = SillyTavern.getContext();
 
 // Basic blocking loader with a stoppable toast
@@ -1114,7 +1114,7 @@ try {
 ### Options
 
 | Option | Default | Description |
-| --- | --- | --- |
+|--------|---------|-------------|
 | `blocking` | `true` | Show a full-screen overlay that blocks interaction |
 | `message` | `'Generating...'` | Message shown in the toast notification |
 | `title` | `''` | Optional title for the toast |
@@ -1128,8 +1128,7 @@ try {
 
 Multiple loaders can be active simultaneously. The overlay stays visible as long as at least one blocking loader is active:
 
-```javascript
-
+```js
 const { loader } = SillyTavern.getContext();
 
 const loader1 = loader.show({ message: 'Task 1...' });
@@ -1142,8 +1141,7 @@ await loader2.hide(); // Now overlay hides
 
 For background tasks that shouldn't block the UI:
 
-```javascript
-
+```js
 const { loader } = SillyTavern.getContext();
 
 const handle = loader.show({
@@ -1159,8 +1157,7 @@ const handle = loader.show({
 
 SillyTavern provides convenient popup helpers via `Popup.show` from `getContext()`:
 
-```javascript
-
+```js
 const { Popup } = SillyTavern.getContext();
 
 // Confirmation dialog — returns POPUP_RESULT.AFFIRMATIVE or POPUP_RESULT.NEGATIVE
@@ -1177,8 +1174,7 @@ await Popup.show.text('Info', 'Operation completed successfully.');
 
 For more complex popups, instantiate `Popup` directly with full options:
 
-```javascript
-
+```js
 const { Popup, POPUP_TYPE, POPUP_RESULT } = SillyTavern.getContext();
 
 const popup = new Popup(
@@ -1189,20 +1185,20 @@ const popup = new Popup(
         wide: true,              // Wide display mode
         okButton: 'Save',       // Custom OK button text
         cancelButton: 'Discard', // Custom Cancel button text
-        customButtons: [\
-            {\
-                text: 'Export',\
-                icon: 'fa-download',\
-                result: POPUP_RESULT.CUSTOM1,\
-            },\
+        customButtons: [
+            {
+                text: 'Export',
+                icon: 'fa-download',
+                result: POPUP_RESULT.CUSTOM1,
+            },
         ],
-        customInputs: [\
-            {\
-                id: 'my_checkbox',\
-                label: 'Enable feature',\
-                type: 'checkbox',\
-                defaultState: false,\
-            },\
+        customInputs: [
+            {
+                id: 'my_checkbox',
+                label: 'Enable feature',
+                type: 'checkbox',
+                defaultState: false,
+            },
         ],
         allowVerticalScrolling: true,
     }
@@ -1223,7 +1219,7 @@ const checkboxValue = popup.inputResults?.get('my_checkbox');
 ### Popup types
 
 | Type | Description |
-| --- | --- |
+|------|-------------|
 | `POPUP_TYPE.TEXT` | General content popup with buttons |
 | `POPUP_TYPE.CONFIRM` | Yes/No confirmation dialog |
 | `POPUP_TYPE.INPUT` | Popup with a text input field |
@@ -1234,8 +1230,7 @@ const checkboxValue = popup.inputResults?.get('my_checkbox');
 
 For lightweight feedback, use `toastr` (globally available):
 
-```javascript
-
+```js
 toastr.success('Data saved successfully');
 toastr.error('Failed to connect to API');
 toastr.warning('This feature is experimental');
@@ -1246,8 +1241,7 @@ toastr.info('Processing...');
 
 Extensions can register custom data scrapers for the Data Bank feature. Scrapers provide a way to import data from custom sources (e.g., web pages, APIs, file formats):
 
-```javascript
-
+```js
 const { registerDataBankScraper } = SillyTavern.getContext();
 
 await registerDataBankScraper({
@@ -1269,8 +1263,7 @@ await registerDataBankScraper({
 
 Extensions can register custom debug functions that appear in the Debug Menu (accessible via the power user settings). This is useful for exposing diagnostic tools, cache/cleanup functionality or manual triggers during development:
 
-```javascript
-
+```js
 const { registerDebugFunction } = SillyTavern.getContext();
 
 registerDebugFunction(
@@ -1287,14 +1280,15 @@ registerDebugFunction(
 
 ## Do Extras request
 
+!!!warning
 The Extras API is deprecated. It's not recommended to use it in new extensions.
+!!!
 
 The `doExtrasFetch()` function allows you to make requests to your SillyTavern Extras API server.
 
 For example, to call the `/api/summarize` endpoint:
 
-```javascript
-
+```js
 import { getApiUrl, doExtrasFetch } from "../../extensions.js";
 
 const url = new URL(getApiUrl());
@@ -1316,18 +1310,18 @@ const apiResult = await doExtrasFetch(url, {
 
 The `doExtrasFetch()` function:
 
-- Adds the `Authorization` and `Bypass-Tunnel-Reminder` headers
-- Handles fetching the result
-- Returns the result (the response object)
+* Adds the `Authorization` and `Bypass-Tunnel-Reminder` headers
+* Handles fetching the result
+* Returns the result (the response object)
 
 This makes it easy to call your Extras API from your extension.
 
 You can specify:
 
-- The request method: GET, POST, etc.
-- Additional headers
-- The body for POST requests
-- Any other fetch options
+* The request method: GET, POST, etc.
+* Additional headers
+* The body for POST requests
+* Any other fetch options
 
 ## Best Practices
 
@@ -1337,8 +1331,7 @@ You can specify:
 
 Extension settings are accessible to all other extensions and are stored in plain text. Do not store sensitive data client-side:
 
-```javascript
-
+```js
 // BAD - Don't do this!
 extensionSettings[MODULE_NAME].apiKey = 'secret_key_123';
 
@@ -1351,8 +1344,7 @@ extensionSettings[MODULE_NAME].apiKey = 'secret_key_123';
 
 Always validate and sanitize data from user inputs before using it in commands, API calls, or DOM manipulation:
 
-```javascript
-
+```js
 // Validate input type first
 if (typeof userInput !== 'string') {
     toastr.error('Invalid input type');
@@ -1373,8 +1365,7 @@ These can execute arbitrary code and pose security risks. If you need dynamic ev
 
 Extension settings are loaded into memory and saved frequently. Large data can cause performance issues:
 
-```javascript
-
+```js
 // BAD - Don't store large data
 extensionSettings[MODULE_NAME].largeDataset = { /* megabytes of data */ };
 
@@ -1390,8 +1381,7 @@ localStorage.setItem(`${MODULE_NAME}_data`, JSON.stringify(smallData));
 
 Remove event listeners when they're no longer needed to prevent memory leaks:
 
-```javascript
-
+```js
 function cleanup() {
     eventSource.removeListener(event_types.MESSAGE_RECEIVED, handleMessage);
     document.getElementById('myElement').removeEventListener('click', handleClick);
@@ -1402,8 +1392,7 @@ function cleanup() {
 
 For heavy operations, use async/await or web workers:
 
-```javascript
-
+```js
 // Use async for I/O operations
 async function processData() {
     const result = await fetch('/api/process');
@@ -1427,8 +1416,7 @@ async function heavyComputation(data) {
 
 The context API is more stable and less likely to break with SillyTavern updates:
 
-```javascript
-
+```js
 // GOOD - Stable API
 const { chat, characters, saveSettingsDebounced } = SillyTavern.getContext();
 
@@ -1440,8 +1428,7 @@ import { chat, characters } from '../../../../script.js';
 
 Prevent conflicts with other extensions by using a descriptive, unique module name:
 
-```javascript
-
+```js
 // GOOD - Specific and unique
 const MODULE_NAME = 'my_extension_name';
 
@@ -1453,16 +1440,15 @@ const MODULE_NAME = 'settings';
 
 **Provide clear feedback**
 
-Use `toastr` for lightweight notifications and `Popup` for important user interactions. See the [Popups and user feedback](https://docs.sillytavern.app/for-contributors/writing-extensions/#popups-and-user-feedback) section for full details.
+Use `toastr` for lightweight notifications and `Popup` for important user interactions. See the [Popups and user feedback](#popups-and-user-feedback) section for full details.
 
-For long-running operations, use the [Action loader](https://docs.sillytavern.app/for-contributors/writing-extensions/#action-loader) instead of blocking the UI silently.
+For long-running operations, use the [Action loader](#action-loader) instead of blocking the UI silently.
 
 **Provide helpful console messages**
 
 Use a consistent prefix for your console logs. But do not spam the console with excessive logs in production:
 
-```javascript
-
+```js
 const MODULE_NAME = 'MyExtension';
 
 console.log(`[${MODULE_NAME}] Extension loaded`);
@@ -1474,14 +1460,13 @@ console.error(`[${MODULE_NAME}] Error occurred:`, error);
 
 **Use bundled libraries from `lib.js`**
 
-Before adding new dependencies, check the [Shared libraries](https://docs.sillytavern.app/for-contributors/writing-extensions/#shared-libraries) section — SillyTavern bundles many common libraries (lodash, Fuse, DOMPurify, moment, yaml, etc.) that are available via `SillyTavern.libs`.
+Before adding new dependencies, check the [Shared libraries](#shared-libraries) section — SillyTavern bundles many common libraries (lodash, Fuse, DOMPurify, moment, yaml, etc.) that are available via `SillyTavern.libs`.
 
 **Initialize settings properly**
 
 Always provide defaults and handle missing keys:
 
-```javascript
-
+```js
 function loadSettings() {
     // Merge with defaults to handle new keys after updates and initialize if it doesn't exist.
     extensionSettings[MODULE_NAME] = SillyTavern.libs.lodash.merge(
@@ -1490,74 +1475,3 @@ function loadSettings() {
     );
 }
 ```
-
-[Contents](https://docs.sillytavern.app/for-contributors/writing-extensions/)
-
-- [Extension submissions](https://docs.sillytavern.app/for-contributors/writing-extensions/#extension-submissions)
-- [Examples](https://docs.sillytavern.app/for-contributors/writing-extensions/#examples)
-- [Bundling](https://docs.sillytavern.app/for-contributors/writing-extensions/#bundling)
-- [manifest.json](https://docs.sillytavern.app/for-contributors/writing-extensions/#manifestjson)
-- [Manifest fields](https://docs.sillytavern.app/for-contributors/writing-extensions/#manifest-fields)
-- [Dependencies](https://docs.sillytavern.app/for-contributors/writing-extensions/#dependencies)
-- [Deprecated fields](https://docs.sillytavern.app/for-contributors/writing-extensions/#deprecated-fields)
-- [Scripting](https://docs.sillytavern.app/for-contributors/writing-extensions/#scripting)
-- [Best practices for extension initialization](https://docs.sillytavern.app/for-contributors/writing-extensions/#best-practices-for-extension-initialization)
-- [Using getContext](https://docs.sillytavern.app/for-contributors/writing-extensions/#using-getcontext)
-- [Shared libraries](https://docs.sillytavern.app/for-contributors/writing-extensions/#shared-libraries)
-- [TypeScript notice](https://docs.sillytavern.app/for-contributors/writing-extensions/#typescript-notice)
-- [HTML templates](https://docs.sillytavern.app/for-contributors/writing-extensions/#html-templates)
-- [Importing from other files](https://docs.sillytavern.app/for-contributors/writing-extensions/#importing-from-other-files)
-- [State management](https://docs.sillytavern.app/for-contributors/writing-extensions/#state-management)
-- [Persistent settings](https://docs.sillytavern.app/for-contributors/writing-extensions/#persistent-settings)
-- [Chat metadata](https://docs.sillytavern.app/for-contributors/writing-extensions/#chat-metadata)
-- [Character cards](https://docs.sillytavern.app/for-contributors/writing-extensions/#character-cards)
-- [Settings presets](https://docs.sillytavern.app/for-contributors/writing-extensions/#settings-presets)
-- [Internationalization](https://docs.sillytavern.app/for-contributors/writing-extensions/#internationalization)
-- [Direct addLocaleData call](https://docs.sillytavern.app/for-contributors/writing-extensions/#direct-addlocaledata-call)
-- [Via the extension manifest](https://docs.sillytavern.app/for-contributors/writing-extensions/#via-the-extension-manifest)
-- [Registering slash commands (new way)](https://docs.sillytavern.app/for-contributors/writing-extensions/#registering-slash-commands-new-way)
-- [Events](https://docs.sillytavern.app/for-contributors/writing-extensions/#events)
-- [Listening to events](https://docs.sillytavern.app/for-contributors/writing-extensions/#listening-to-events)
-- [Emitting events](https://docs.sillytavern.app/for-contributors/writing-extensions/#emitting-events)
-- [Prompt Interceptors](https://docs.sillytavern.app/for-contributors/writing-extensions/#prompt-interceptors)
-- [Registering an Interceptor](https://docs.sillytavern.app/for-contributors/writing-extensions/#registering-an-interceptor)
-- [Interceptor Function](https://docs.sillytavern.app/for-contributors/writing-extensions/#interceptor-function)
-- [Lifecycle Hooks](https://docs.sillytavern.app/for-contributors/writing-extensions/#lifecycle-hooks)
-- [Available hooks](https://docs.sillytavern.app/for-contributors/writing-extensions/#available-hooks)
-- [Manifest configuration](https://docs.sillytavern.app/for-contributors/writing-extensions/#manifest-configuration)
-- [Implementation](https://docs.sillytavern.app/for-contributors/writing-extensions/#implementation)
-- [Generating text](https://docs.sillytavern.app/for-contributors/writing-extensions/#generating-text)
-- [Within a chat context](https://docs.sillytavern.app/for-contributors/writing-extensions/#within-a-chat-context)
-- [Raw generation](https://docs.sillytavern.app/for-contributors/writing-extensions/#raw-generation)
-- [Structured Outputs](https://docs.sillytavern.app/for-contributors/writing-extensions/#structured-outputs)
-- [Registering custom macros](https://docs.sillytavern.app/for-contributors/writing-extensions/#registering-custom-macros)
-- [New macro system](https://docs.sillytavern.app/for-contributors/writing-extensions/#new-macro-system)
-- [Legacy macro system (deprecated)](https://docs.sillytavern.app/for-contributors/writing-extensions/#legacy-macro-system-deprecated)
-- [Message formatting hooks](https://docs.sillytavern.app/for-contributors/writing-extensions/#message-formatting-hooks)
-- [Pipeline stages](https://docs.sillytavern.app/for-contributors/writing-extensions/#pipeline-stages)
-- [Registering a hook](https://docs.sillytavern.app/for-contributors/writing-extensions/#registering-a-hook)
-- [Hook context](https://docs.sillytavern.app/for-contributors/writing-extensions/#hook-context)
-- [Hook ordering](https://docs.sillytavern.app/for-contributors/writing-extensions/#hook-ordering)
-- [Error handling](https://docs.sillytavern.app/for-contributors/writing-extensions/#error-handling)
-- [Full pipeline order](https://docs.sillytavern.app/for-contributors/writing-extensions/#full-pipeline-order)
-- [Function tool calling](https://docs.sillytavern.app/for-contributors/writing-extensions/#function-tool-calling)
-- [Action loader](https://docs.sillytavern.app/for-contributors/writing-extensions/#action-loader)
-- [Options](https://docs.sillytavern.app/for-contributors/writing-extensions/#options)
-- [Stacking loaders](https://docs.sillytavern.app/for-contributors/writing-extensions/#stacking-loaders)
-- [Non-blocking loader](https://docs.sillytavern.app/for-contributors/writing-extensions/#non-blocking-loader)
-- [Popups and user feedback](https://docs.sillytavern.app/for-contributors/writing-extensions/#popups-and-user-feedback)
-- [Popup helpers](https://docs.sillytavern.app/for-contributors/writing-extensions/#popup-helpers)
-- [Custom popups](https://docs.sillytavern.app/for-contributors/writing-extensions/#custom-popups)
-- [Popup types](https://docs.sillytavern.app/for-contributors/writing-extensions/#popup-types)
-- [Toast notifications](https://docs.sillytavern.app/for-contributors/writing-extensions/#toast-notifications)
-- [Data bank scrapers](https://docs.sillytavern.app/for-contributors/writing-extensions/#data-bank-scrapers)
-- [Debug functions](https://docs.sillytavern.app/for-contributors/writing-extensions/#debug-functions)
-- [Do Extras request](https://docs.sillytavern.app/for-contributors/writing-extensions/#do-extras-request)
-- [Best Practices](https://docs.sillytavern.app/for-contributors/writing-extensions/#best-practices)
-- [Security](https://docs.sillytavern.app/for-contributors/writing-extensions/#security)
-- [Performance](https://docs.sillytavern.app/for-contributors/writing-extensions/#performance)
-- [Compatibility](https://docs.sillytavern.app/for-contributors/writing-extensions/#compatibility)
-- [User Experience](https://docs.sillytavern.app/for-contributors/writing-extensions/#user-experience)
-- [Code Quality](https://docs.sillytavern.app/for-contributors/writing-extensions/#code-quality)
-
-Ctrl K

@@ -1,4 +1,10 @@
-# Function Calling    Copy
+---
+order: -10
+icon: code-review
+route: /for-contributors/function-calling/
+---
+
+# Function Calling
 
 Function Calling allows adding dynamic functionality to your extensions by letting the LLM use structured data that you then can use to trigger a specific functionality of the extension.
 
@@ -11,11 +17,11 @@ Function Calling allows adding dynamic functionality to your extensions by letti
 
 ## Officially supported extensions using function calling
 
-1. [Image Generation](https://docs.sillytavern.app/extensions/stable-diffusion/) (built-in) - generate images based on user prompts.
-2. [Web Search](https://docs.sillytavern.app/extensions/websearch/) \- trigger a web search for a query.
-3. [RSS](https://github.com/SillyTavern/Extension-RSS/) \- fetch the latest news from RSS feeds.
-4. [Weather](https://github.com/SillyTavern/Extension-Weather) \- fetch the weather information from weather APIs.
-5. [D&D Dice](https://github.com/SillyTavern/Extension-Dice) \- roll dice for D&D games.
+1. [Image Generation](/extensions/Stable-Diffusion.md) (built-in) - generate images based on user prompts.
+2. [Web Search](/extensions/WebSearch.md) - trigger a web search for a query.
+3. [RSS](https://github.com/SillyTavern/Extension-RSS/) - fetch the latest news from RSS feeds.
+4. [Weather](https://github.com/SillyTavern/Extension-Weather) - fetch the weather information from weather APIs.
+5. [D&D Dice](https://github.com/SillyTavern/Extension-Dice) - roll dice for D&D games.
 
 ## Prerequisites and limitations
 
@@ -32,7 +38,7 @@ To prevent infinite loops of tool calls, there is a recursion limit (default: 5 
 
 ## Interleaved Thinking
 
-When using tool calling with a [reasoning model](https://docs.sillytavern.app/usage/prompts/reasoning/), you can leverage reasoning returned together with tool-call requests to maintain interleaved thinking context. For some models, this is necessary to ensure consistency and preserve important details between tool calls.
+When using tool calling with a [reasoning model](../Usage/Prompts/reasoning.md), you can leverage reasoning returned together with tool-call requests to maintain interleaved thinking context. For some models, this is necessary to ensure consistency and preserve important details between tool calls.
 
 Choose one of the following settings in the AI response configuration:
 
@@ -46,8 +52,7 @@ Choose one of the following settings in the AI response configuration:
 
 Use `isToolCallingSupported()` from `SillyTavern.getContext()` to check if the current API supports function tool calling and if it's enabled in the settings:
 
-```javascript
-
+```js
 const { isToolCallingSupported } = SillyTavern.getContext();
 
 if (isToolCallingSupported()) {
@@ -57,8 +62,7 @@ if (isToolCallingSupported()) {
 
 You can also check whether tool calls can be performed for a specific generation type. Continuations, impersonation, and background ('quiet') prompts are not allowed to trigger tool calls:
 
-```javascript
-
+```js
 const { canPerformToolCalls } = SillyTavern.getContext();
 
 if (canPerformToolCalls('normal')) {
@@ -70,8 +74,7 @@ if (canPerformToolCalls('normal')) {
 
 Use `registerFunctionTool()` from `SillyTavern.getContext()` to register a tool. The tool definition follows the [JSON Schema](https://json-schema.org/) format for its parameters:
 
-```javascript
-
+```js
 const { registerFunctionTool } = SillyTavern.getContext();
 
 registerFunctionTool({
@@ -108,7 +111,7 @@ registerFunctionTool({
 ### Registration fields
 
 | Field | Required | Description |
-| --- | --- | --- |
+|-------|----------|-------------|
 | `name` | Yes | Unique identifier for the tool |
 | `displayName` | No | User-friendly display name shown in the UI |
 | `description` | Yes | Description sent to the LLM to explain what the tool does and when to use it |
@@ -122,8 +125,7 @@ registerFunctionTool({
 
 To deactivate a function tool, call `unregisterFunctionTool()` with the tool's name:
 
-```javascript
-
+```js
 const { unregisterFunctionTool } = SillyTavern.getContext();
 
 unregisterFunctionTool('get_weather');
@@ -136,19 +138,3 @@ unregisterFunctionTool('get_weather');
 3. Write clear, specific descriptions for your tools — the LLM uses these to decide when and how to call them. Include guidance on when the tool should be used.
 4. Keep the parameter schema simple and well-documented. Each property's `description` helps the LLM fill in the correct values.
 5. Tool calls have a recursion limit (default: 5 rounds). If the LLM keeps calling tools repeatedly, execution will stop after the limit is reached.
-
-[Contents](https://docs.sillytavern.app/for-contributors/function-calling/)
-
-- [Example use cases](https://docs.sillytavern.app/for-contributors/function-calling/#example-use-cases)
-- [Officially supported extensions using function calling](https://docs.sillytavern.app/for-contributors/function-calling/#officially-supported-extensions-using-function-calling)
-- [Prerequisites and limitations](https://docs.sillytavern.app/for-contributors/function-calling/#prerequisites-and-limitations)
-- [Tool calling recursion limit](https://docs.sillytavern.app/for-contributors/function-calling/#tool-calling-recursion-limit)
-- [Interleaved Thinking](https://docs.sillytavern.app/for-contributors/function-calling/#interleaved-thinking)
-- [How to make a function tool](https://docs.sillytavern.app/for-contributors/function-calling/#how-to-make-a-function-tool)
-- [Check if the feature is supported](https://docs.sillytavern.app/for-contributors/function-calling/#check-if-the-feature-is-supported)
-- [Register a function tool](https://docs.sillytavern.app/for-contributors/function-calling/#register-a-function-tool)
-- [Registration fields](https://docs.sillytavern.app/for-contributors/function-calling/#registration-fields)
-- [Unregister a function tool](https://docs.sillytavern.app/for-contributors/function-calling/#unregister-a-function-tool)
-- [Tips and tricks](https://docs.sillytavern.app/for-contributors/function-calling/#tips-and-tricks)
-
-Ctrl K
