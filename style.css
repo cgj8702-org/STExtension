@@ -87,3 +87,20 @@
     opacity: 0.85;
     border-color: #d9534f;
 }
+
+/* Notification + log settings */
+.lovense-integration-settings .lovense-notify-group .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.lovense-integration-settings .lovense-notify-group input[type="checkbox"] {
+    width: auto;
+}
+
+.lovense-integration-settings .lovense-log-buttons {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}

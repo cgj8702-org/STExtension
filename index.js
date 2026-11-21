@@ -1,13 +1,16 @@
 // @ts-nocheck
-import { LovenseClient } from './lovense-client.js?v=16';
+import { LovenseClient } from './lovense-client.js?v=17';
 import {
     clampStrength, clampDuration, clampDelay,
     convertRedactedTags, DelayedCommandQueue, createUnlockSession,
-} from './haptic-utils.js?v=16';
+} from './haptic-utils.js?v=17';
+import {
+    clampToastSeconds, toastOptions, formatLogLine, toBase64Utf8, LogFileWriter, DEFAULT_TOAST_SECONDS,
+} from './log-utils.js?v=17';
 import { SlashCommandParser } from '/scripts/slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '/scripts/slash-commands/SlashCommand.js';
 import { SlashCommandArgument, ARGUMENT_TYPE } from '/scripts/slash-commands/SlashCommandArgument.js';
-import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '/script.js';
+import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles, getRequestHeaders } from '/script.js';
 
 const MODULE_NAME = 'lovense_integration';
 const EXTENSION_PROMPT_TAG = 'lovense_control';
@@ -25,6 +28,8 @@ const defaultSettings = Object.freeze({
     userId: '',
     allowDelayedCommands: false, // opt-in: model may schedule commands for later
     enableHapticUnlock: false, // opt-in: <redacted> secrets unlocked by a haptic cycle
+    toastTimeoutSec: DEFAULT_TOAST_SECONDS, // 0 = stay until dismissed
+    saveLogToFile: false, // opt-in: write notifications + commands to a .log file in SillyTavern's user files
     customGuidelines: `You have access to the tool 'control_lovense_toy' to control the user's physical Lovense Ferri device.
 
 SAFETY LIMIT (HARD CAP): NEVER exceed strength 3. 0 = stop, 1 = gentle tease, 2 = moderate, 3 = MAXIMUM. Even 4 is physically too much. If a scene calls for "intense", use strength 3 with a longer duration instead.
@@ -75,6 +80,75 @@ let delayedQueue = null;
 const activeUnlocks = new Set(); // abort() functions of running unlock sessions
 let generationInFlight = false;
 let generationGraceUntil = 0; // ms timestamp; late render events right after a generation still count
+
+// ---- Notifications + local log ---------------------------------------------------------------
+const LOG_FILE_BASE = 'lovense-integration';
+let logFileName = `${LOG_FILE_BASE}.log`;
+let logWriter = null;
+let loadedExistingLog = false;
+
+function logEvent(level, message, title = 'Lovense') {
+    try {
+        logWriter?.append(formatLogLine(level, message, title));
+    } catch (e) {
+        console.warn('[Lovense] Failed to record log line:', e);
+    }
+}
+
+/** Toast with the user's chosen duration, and always record it in the log. */
+function notify(level, message, title = 'Lovense') {
+    logEvent(level, message, title);
+    const show = window.toastr?.[level];
+    if (typeof show === 'function') {
+        show.call(window.toastr, message, title, toastOptions(settings?.toastTimeoutSec));
+    }
+}
+
+/** Write the whole log through SillyTavern's user-files API (overwrites; lands in <user>/user/files/). */
+async function uploadLog(text) {
+    const res = await fetch('/api/files/upload', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ name: logFileName, data: toBase64Utf8(text) }),
+    });
+    if (!res.ok) {
+        // Some SillyTavern builds forbid certain extensions; fall back to .txt once.
+        if (res.status === 400 && logFileName.endsWith('.log')) {
+            logFileName = `${LOG_FILE_BASE}.txt`;
+            console.warn('[Lovense] Server refused the .log name; falling back to', logFileName);
+            return uploadLog(text);
+        }
+        throw new Error(`log upload failed: HTTP ${res.status}`);
+    }
+}
+
+/** Pull previously saved log text in front of this session's lines (once). */
+async function loadExistingLog() {
+    if (loadedExistingLog || !logWriter) return;
+    loadedExistingLog = true;
+    for (const name of [`${LOG_FILE_BASE}.log`, `${LOG_FILE_BASE}.txt`]) {
+        try {
+            const res = await fetch(`/user/files/${name}`, { cache: 'no-store' });
+            if (res.ok) {
+                logWriter.prepend(await res.text());
+                logFileName = name;
+                return;
+            }
+        } catch { /* no existing log - start fresh */ }
+    }
+}
+
+function downloadLog() {
+    const text = logWriter?.text || '';
+    const blob = new Blob([text || '(log is empty)\n'], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${LOG_FILE_BASE}.log`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 
 function getSettings() {
     const { extensionSettings } = stContext;
@@ -166,7 +240,10 @@ function cancelPendingActivity() {
         try { abort(); } catch (e) { console.warn('[Lovense] Unlock abort failed:', e); }
     }
     activeUnlocks.clear();
-    if (cancelled > 0) console.log(`[Lovense] Cancelled ${cancelled} pending delayed command(s)`);
+    if (cancelled > 0) {
+        console.log(`[Lovense] Cancelled ${cancelled} pending delayed command(s)`);
+        logEvent('info', `Cancelled ${cancelled} pending delayed command(s)`, 'Cancel');
+    }
 }
 
 /** Full stop: pending delays, running unlocks, loops, and the device itself. */
@@ -343,7 +420,7 @@ function handleToolResponse(apiResponse) {
 function getDelayedQueue() {
     if (!delayedQueue) {
         delayedQueue = new DelayedCommandQueue({
-            send: cmd => client.sendCommand(cmd),
+            send: cmd => sendLogged(cmd, 'Delayed fire'),
             onError: e => console.error('[Lovense] Delayed command failed:', e),
             onChange: n => window.$('#lovense_pending_count').text(String(n)),
         });
@@ -357,12 +434,25 @@ function getDelayedQueue() {
  * - delay is honoured only when the user enabled "Allow delayed commands".
  * Callers must pass already-clamped strength/duration.
  */
+async function sendLogged(cmd, label = 'Command') {
+    const target = cmd.toyId ? ` toy=${cmd.toyId}` : '';
+    try {
+        const res = await client.sendCommand(cmd);
+        const ok = res?.code === 200 || res?.result === true;
+        logEvent(ok ? 'info' : 'warn', `${cmd.action} @ ${cmd.strength} for ${cmd.duration}s${target} -> ${ok ? 'ok' : `code ${res?.code}`}`, label);
+        return res;
+    } catch (e) {
+        logEvent('error', `${cmd.action} @ ${cmd.strength} for ${cmd.duration}s${target} failed: ${e.message || e}`, label);
+        throw e;
+    }
+}
+
 async function dispatchCommand({ action, strength, duration, toyId = null, delay = 0 }) {
     if (String(action).toLowerCase() === 'stop') {
         cancelPendingActivity();
         clearLoopState();
         messageCommands = []; // a Stop mid-message must not be undone by a loop replay at generation end
-        return client.sendCommand({ action: 'Stop', strength: 0, duration: 0, toyId });
+        return sendLogged({ action: 'Stop', strength: 0, duration: 0, toyId }, 'Stop');
     }
 
     let wait = clampDelay(delay);
@@ -373,15 +463,19 @@ async function dispatchCommand({ action, strength, duration, toyId = null, delay
 
     if (wait > 0) {
         const res = getDelayedQueue().schedule({ action, strength, duration, toyId }, wait);
-        if (!res.ok) return { code: 429, result: false, message: res.reason };
+        if (!res.ok) {
+            logEvent('warn', `Delayed ${action} refused: ${res.reason}`, 'Delayed');
+            return { code: 429, result: false, message: res.reason };
+        }
         console.log(`[Lovense] Scheduled ${action} @ ${strength} for ${duration}s in ${wait}s`);
+        logEvent('info', `Scheduled ${action} @ ${strength} for ${duration}s in ${wait}s`, 'Delayed');
         if (settings.connectionMode === 'mock') {
-            window.toastr.info(`${action} @ Lvl ${strength} in ${wait}s`, 'Lovense Mock (Delayed)');
+            notify('info', `${action} @ Lvl ${strength} in ${wait}s`, 'Lovense Mock (Delayed)');
         }
         return { code: 200, result: true, scheduled: true, delay: wait };
     }
 
-    return client.sendCommand({ action, strength, duration, toyId });
+    return sendLogged({ action, strength, duration, toyId });
 }
 
 function parseAttributes(attrString) {
@@ -482,7 +576,7 @@ function registerParserHook(lovenseClient) {
         console.warn(`${prefix} Executing: action=${action}, strength=${strength}, duration=${duration}s, toyId=${toyId}, loop=${loop}, delay=${delay}s`);
 
         if (isMock) {
-            window.toastr.info(
+            notify('info', 
                 `${action} @ Lvl ${strength} for ${duration}s${loop ? ' (loop)' : ''}${delay ? ` in ${delay}s` : ''}`,
                 'Lovense Mock (Parser)',
             );
@@ -657,6 +751,7 @@ function enhanceRedactedInMessage(chatIndex) {
         const newSession = () => createUnlockSession({
             duration,
             start: async () => {
+                logEvent('info', `Haptic unlock started (${action} @ ${strength} for ${duration}s)`, 'Unlock');
                 const res = await dispatchCommand({ action, strength, duration });
                 if (!(res?.code === 200 || res?.result === true)) {
                     throw new Error(res?.message || `device returned code ${res?.code}`);
@@ -670,12 +765,14 @@ function enhanceRedactedInMessage(chatIndex) {
                 btn.textContent = `⏳ ${n}s — tap to stop`;
             },
             onDone: () => {
+                logEvent('info', `Haptic unlock completed (${action} @ ${strength} for ${duration}s) - secret revealed`, 'Unlock');
                 activeUnlocks.delete(abortFn);
                 textEl.classList.remove('lovense-redacted-blur');
                 textEl.classList.add('lovense-unlocked-text');
                 btn.remove();
             },
             onAbort: () => {
+                logEvent('info', 'Haptic unlock aborted by user - secret stays locked', 'Unlock');
                 activeUnlocks.delete(abortFn);
                 resetButton();
                 session = null;
@@ -684,7 +781,7 @@ function enhanceRedactedInMessage(chatIndex) {
                 activeUnlocks.delete(abortFn);
                 resetButton();
                 session = null;
-                window.toastr.error(`Haptic unlock failed to start: ${e.message || e}`, 'Lovense');
+                notify('error', `Haptic unlock failed to start: ${e.message || e}`, 'Lovense');
             },
         });
         const abortFn = () => session?.abort();
@@ -773,6 +870,33 @@ async function updateUI() {
         saveSettingsDebounced();
     });
 
+    window.$('#lovense_toastTimeoutSec').on('change', (e) => {
+        settings.toastTimeoutSec = clampToastSeconds(e.target.value);
+        e.target.value = settings.toastTimeoutSec;
+        saveSettingsDebounced();
+    });
+
+    window.$('#lovense_saveLogToFile').on('change', async (e) => {
+        settings.saveLogToFile = e.target.checked;
+        saveSettingsDebounced();
+        if (settings.saveLogToFile) {
+            await loadExistingLog();
+            logEvent('info', 'Log file saving enabled', 'Log');
+            await logWriter?.flush();
+            if (logWriter?.lastError) {
+                notify('error', `Could not write the log file: ${logWriter.lastError.message}`, 'Lovense');
+            }
+        }
+    });
+
+    window.$('#lovense_download_log').on('click', downloadLog);
+
+    window.$('#lovense_clear_log').on('click', async () => {
+        logWriter?.clear();
+        await logWriter?.flush();
+        window.toastr?.success?.('Lovense log cleared.', 'Lovense', toastOptions(settings.toastTimeoutSec));
+    });
+
     window.$('#lovense_customGuidelines').on('input', (e) => {
         settings.customGuidelines = e.target.value;
         updateLovensePrompt();
@@ -795,24 +919,24 @@ async function updateUI() {
         if (result.ok) {
             if (result.mode === 'mock') {
                 statusEl.text(`Status: Mock (${result.count} simulated toys)`);
-                window.toastr.success(`Mock mode active! ${result.count} simulated toys loaded.`);
+                notify('success', `Mock mode active! ${result.count} simulated toys loaded.`);
             } else if (result.mode === 'server') {
                 statusEl.text('Status: Connected (Server API)');
-                window.toastr.success('Lovense Server API connection successful!');
+                notify('success', 'Lovense Server API connection successful!');
             } else {
                 statusEl.text(`Status: Connected (${result.count} toys)`);
-                window.toastr.success(`Lovense connected! Found ${result.count} toy(s).`);
+                notify('success', `Lovense connected! Found ${result.count} toy(s).`);
             }
             await updateToyCache();
         } else {
             statusEl.text('Status: Disconnected');
-            window.toastr.error(`Connection failed: ${result.error}`);
+            notify('error', `Connection failed: ${result.error}`);
         }
     });
 
     window.$('#lovense_stop_all').on('click', () => {
         stopEverything();
-        window.toastr.success('All toys stopped; loops, delayed commands and unlocks cleared.', 'Lovense');
+        notify('success', 'All toys stopped; loops, delayed commands and unlocks cleared.', 'Lovense');
     });
 
     toggleSettingsVisibility();
@@ -930,7 +1054,7 @@ function registerLovenseTools() {
 
             if (isMock) {
                 console.log(`[Lovense Mock Tool] action=${action}, strength=${sanitizedStrength}, duration=${finalDuration}s, loop=${wantLoop}, delay=${finalDelay}s, toyId=${toyId || 'all'}`);
-                window.toastr.info(
+                notify('info', 
                     `${action} @ Lvl ${sanitizedStrength} for ${finalDuration}s${wantLoop ? ' (loop)' : ''}${finalDelay ? ` in ${finalDelay}s` : ''}`,
                     'Lovense Mock (Tool Call)',
                 );
@@ -958,11 +1082,18 @@ export async function onActivate() {
 
         settings = getSettings();
         client = new LovenseClient(settings);
+        logWriter = new LogFileWriter({
+            upload: uploadLog,
+            isEnabled: () => settings.saveLogToFile,
+            onError: e => console.warn('[Lovense] Could not save log file:', e.message || e),
+        });
+        if (settings.saveLogToFile) await loadExistingLog();
+        logEvent('info', `Extension activated (mode=${settings.connectionMode})`, 'Lovense');
 
         const isMock = settings.connectionMode === 'mock';
         if (isMock) {
             console.log('%c[Lovense] MOCK MODE ACTIVE - No real API calls will be made', 'color: #00e5ff; font-weight: bold; font-size: 14px;');
-            window.toastr.info('Mock mode active. Simulated toys loaded, no real API calls.', 'Lovense Integration');
+            notify('info', 'Mock mode active. Simulated toys loaded, no real API calls.', 'Lovense Integration');
         }
 
         // Detect native tool support
