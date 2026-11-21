@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { LovenseClient } from './lovense-client.js?v=11';
+import { LovenseClient } from './lovense-client.js?v=14';
 import { SlashCommandParser } from '/scripts/slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '/scripts/slash-commands/SlashCommand.js';
 import { SlashCommandArgument, ARGUMENT_TYPE } from '/scripts/slash-commands/SlashCommandArgument.js';
@@ -43,7 +43,7 @@ Call 'control_lovense_toy' with: action ('Vibrate', 'Pulse', 'Wave', 'Fireworks'
   - 'Fireworks': Explosive, erratic pattern bursts.
   - 'Earthquake': Heavy, intense rumbling.
   - 'Stop': Immediately halt all device activity.
-    (Fallback: If tool calls are unsupported, include "lovense": {"action": "Vibrate", "strength": X, "duration": Y} in your JSON tracker).
+    (Fallback: If tool calls are unsupported, include "lovense": {"action": "Vibrate", "strength": X, "duration": Y} in your JSON tracker, or call <call:control_lovense_toy action="Vibrate" strength="10" duration="5"/>).
 
 `,
 });
@@ -53,6 +53,8 @@ let client;
 let cachedToys = {};
 let stContext = null;
 let isNativeSupported = false;
+let isDeviceOnline = null;
+let toyCacheInterval = null;
 
 // Command playback state.
 // B+C behavior: every command fires ONCE by default. Only commands with
@@ -151,16 +153,49 @@ function stopLoopingCommands() {
     console.log('[Lovense] Stopped command loop');
 }
 
+function startToyCachePolling() {
+    stopToyCachePolling();
+    // Only poll in local mode where GetToys LAN API is supported
+    if (settings?.connectionMode === 'local') {
+        toyCacheInterval = setInterval(updateToyCache, 30000);
+    }
+}
+
+function stopToyCachePolling() {
+    if (toyCacheInterval) {
+        clearInterval(toyCacheInterval);
+        toyCacheInterval = null;
+    }
+}
+
 async function updateToyCache() {
     if (!client) return;
     try {
         const toys = await client.getToys();
         if (toys && !toys.error) {
+            const toyCount = Object.keys(toys).length;
+            if (isDeviceOnline !== true) {
+                console.log(`[Lovense] Connected to toy service (${toyCount} toy${toyCount === 1 ? '' : 's'} cached).`);
+                isDeviceOnline = true;
+            }
             cachedToys = toys;
+            updateLovensePrompt();
+        } else {
+            const errorMsg = toys?.error || 'Unknown error';
+            if (isDeviceOnline !== false) {
+                console.warn(`[Lovense] Unable to reach Lovense device daemon: ${errorMsg}. Using fallback guidelines.`);
+                isDeviceOnline = false;
+            }
+            cachedToys = {};
             updateLovensePrompt();
         }
     } catch (e) {
-        console.warn("[Lovense] Could not update toy cache:", e);
+        if (isDeviceOnline !== false) {
+            console.warn('[Lovense] Could not update toy cache:', e.message || e);
+            isDeviceOnline = false;
+        }
+        cachedToys = {};
+        updateLovensePrompt();
     }
 }
 
@@ -169,7 +204,19 @@ async function updateToyCache() {
  */
 function generateDynamicPrompt() {
     const toyKeys = Object.keys(cachedToys);
-    if (toyKeys.length === 0) return '';
+    const guidelines = settings?.customGuidelines || defaultSettings.customGuidelines;
+
+    if (toyKeys.length === 0) {
+        return `[LOVENSE SYSTEM INSTRUCTION: You can control the user's Lovense device during this conversation:
+Connected devices: Active Lovense Device (Default)
+
+Capabilities:
+• Vibrate (1-20): ALL devices
+• Patterns: Pulse, Wave, Fireworks, Earthquake (1-20)
+• Stop: Halt device activity
+
+${guidelines}]`;
+    }
 
     const capabilities = new Set(['vibrate']); // All toys can vibrate
     const toyNames = [];
@@ -212,8 +259,6 @@ function generateDynamicPrompt() {
         }
     }
 
-    const guidelines = settings.customGuidelines || defaultSettings.customGuidelines;
-
     return `[LOVENSE SYSTEM INSTRUCTION: You can control the user's Lovense device during this conversation:
 Connected devices: ${toyNames.join(', ')}
 
@@ -228,14 +273,6 @@ ${guidelines}]`;
  */
 function updateLovensePrompt() {
     if (!stContext || !settings) return;
-
-    const isLocalMode = settings.connectionMode === 'local';
-
-    // In local mode, skip if no toys are connected. In server/mock mode, proceed anyway.
-    if (isLocalMode && Object.keys(cachedToys).length === 0) {
-        setExtensionPrompt(EXTENSION_PROMPT_TAG, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-        return;
-    }
 
     const prompt = generateDynamicPrompt();
     setExtensionPrompt(
@@ -275,11 +312,14 @@ function parseAttributes(attrString) {
     }
 
     // Standard attribute pattern: key="value" or key='value' or key=value
-    const regex = /([a-zA-Z0-9_\-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
+    const regex = /([a-zA-Z0-9_\-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>,)]+))/g;
     let match;
     while ((match = regex.exec(attrString)) !== null) {
         const key = match[1];
-        const val = match[2] ?? match[3] ?? match[4];
+        let val = match[2] ?? match[3] ?? match[4];
+        if (typeof val === 'string') {
+            val = val.replace(/[,;]+$/, '').trim();
+        }
         attrs[key] = val;
     }
     return attrs;
@@ -422,6 +462,21 @@ function registerParserHook(lovenseClient) {
                 console.error("[Lovense Fallback] Failed to parse XML-style tag attributes:", e);
             }
         }
+
+        // 3. Parse inline pseudo-function calls: `control_lovense_toy(action="Pulse", strength=4, duration=60)`
+        const inlineFuncRegex = /(?:`|\b)control_lovense_toy\s*\(([^)]+?)\)(?:`|\b)/g;
+        while ((match = inlineFuncRegex.exec(mes)) !== null) {
+            try {
+                const argString = match[1];
+                const parsedAttrs = parseAttributes(argString);
+                if (parsedAttrs && (parsedAttrs.action || parsedAttrs.strength !== undefined)) {
+                    console.warn("[Lovense Fallback] Found inline function call:", parsedAttrs);
+                    executeFallbackCommand(parsedAttrs);
+                }
+            } catch (e) {
+                console.error("[Lovense Fallback] Failed to parse inline function call:", e);
+            }
+        }
     }
 
     // Register listeners for rendered and received bot messages
@@ -471,21 +526,30 @@ async function updateUI() {
     console.log('[Lovense UI] Appending settings panel to container');
     container.append(settingsHtml);
 
-    window.$('#lovense_connectionMode').on('change', (e) => {
-        console.warn('[Lovense UI] Connection Mode dropdown changed to:', e.target.value);
-        settings.connectionMode = e.target.value;
+    window.$('#lovense_connectionMode').on('change', async (e) => {
+        const newMode = e.target.value;
+        console.warn('[Lovense UI] Connection Mode dropdown changed to:', newMode);
+        settings.connectionMode = newMode;
         toggleSettingsVisibility();
         saveSettingsDebounced();
+
+        isDeviceOnline = null;
+        startToyCachePolling();
+        await updateToyCache();
     });
 
-    window.$('#lovense_localPort').on('change', (e) => {
+    window.$('#lovense_localPort').on('change', async (e) => {
         settings.localPort = e.target.value;
         saveSettingsDebounced();
+        isDeviceOnline = null;
+        await updateToyCache();
     });
 
-    window.$('#lovense_localDomain').on('change', (e) => {
+    window.$('#lovense_localDomain').on('change', async (e) => {
         settings.localDomain = e.target.value;
         saveSettingsDebounced();
+        isDeviceOnline = null;
+        await updateToyCache();
     });
 
     window.$('#lovense_developerToken').on('change', (e) => {
@@ -515,18 +579,23 @@ async function updateUI() {
         console.warn('[Lovense UI] Test Connection clicked. Current mode:', settings.connectionMode);
         const statusEl = window.$('#lovense_connection_status');
         statusEl.text('Testing...');
-        try {
-            const result = await client.getToys();
-            console.warn('[Lovense UI] Test Connection result:', result);
-            if (result.error) throw new Error(result.error);
-            const isMock = settings.connectionMode === 'mock';
-            const toyCount = Object.keys(result).length;
-            statusEl.text(isMock ? `Status: Mock (${toyCount} simulated toys)` : 'Status: Connected');
-            window.toastr.success(isMock ? `Mock mode active! ${toyCount} simulated toys loaded.` : 'Lovense connection successful!');
-        } catch (e) {
-            console.error('[Lovense UI] Test Connection failed:', e);
+        const result = await client.testConnection();
+        console.warn('[Lovense UI] Test Connection result:', result);
+        if (result.ok) {
+            if (result.mode === 'mock') {
+                statusEl.text(`Status: Mock (${result.count} simulated toys)`);
+                window.toastr.success(`Mock mode active! ${result.count} simulated toys loaded.`);
+            } else if (result.mode === 'server') {
+                statusEl.text('Status: Connected (Server API)');
+                window.toastr.success('Lovense Server API connection successful!');
+            } else {
+                statusEl.text(`Status: Connected (${result.count} toys)`);
+                window.toastr.success(`Lovense connected! Found ${result.count} toy(s).`);
+            }
+            await updateToyCache();
+        } else {
             statusEl.text('Status: Disconnected');
-            window.toastr.error(`Connection failed: ${e.message}`);
+            window.toastr.error(`Connection failed: ${result.error}`);
         }
     });
 
@@ -696,9 +765,7 @@ export async function onActivate() {
 
         await updateToyCache();
         updateLovensePrompt(); // Initial prompt injection
-        if (!isMock) {
-            setInterval(updateToyCache, 30000);
-        }
+        startToyCachePolling();
 
         console.log('Lovense Toy Integration activated successfully');
     } catch (e) {
