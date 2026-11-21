@@ -74,6 +74,24 @@
                 <small>Lets the AI hide text in &lt;redacted&gt; tags. It stays blurred until you tap the button and the toy completes the cycle. You can tap again at any time to stop and re-lock it.</small>
             </div>
 
+            <div class="settings-group lovense-notify-group">
+                <label for="lovense_toastTimeoutSec">
+                    <span data-i18n="Notification duration (seconds)">Notification duration (seconds)</span>
+                </label>
+                <input id="lovense_toastTimeoutSec" type="number" min="0" max="120" step="1" value="{{toastTimeoutSec}}" />
+                <small>0 = stay until you dismiss them with the X.</small>
+
+                <label class="checkbox_label" for="lovense_saveLogToFile">
+                    <input id="lovense_saveLogToFile" type="checkbox" {{#if saveLogToFile}}checked{{/if}} />
+                    <span data-i18n="Save notifications and commands to a log file">Save notifications and commands to a log file</span>
+                </label>
+                <small>Written to <code>lovense-integration.log</code> in your SillyTavern user files folder (e.g. <code>data/default-user/user/files/</code>). Contains timestamps of device activity, so it is off by default.</small>
+                <div class="lovense-log-buttons">
+                    <button id="lovense_download_log" class="menu_button" type="button"><i class="fa-solid fa-download"></i> <span>Download log</span></button>
+                    <button id="lovense_clear_log" class="menu_button" type="button"><i class="fa-solid fa-trash"></i> <span>Clear log</span></button>
+                </div>
+            </div>
+
             <div class="settings-group" style="margin-top: 10px;">
                 <label for="lovense_customGuidelines">
                     <span data-i18n="AI Guidelines">AI Guidelines</span>

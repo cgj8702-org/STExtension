@@ -24,7 +24,8 @@ const stubs = {
     cmd: `export const SlashCommand = { fromProps: p => p };`,
     arg: `export const SlashCommandArgument = { fromProps: p => p }; export const ARGUMENT_TYPE = { STRING: 's', NUMBER: 'n' };`,
     script: `export const prompts = []; export const setExtensionPrompt = (...a) => prompts.push(a);
-             export const extension_prompt_types = { IN_CHAT: 1 }; export const extension_prompt_roles = { SYSTEM: 0 };`,
+             export const extension_prompt_types = { IN_CHAT: 1 }; export const extension_prompt_roles = { SYSTEM: 0 };
+             export const getRequestHeaders = () => ({ 'Content-Type': 'application/json', 'X-CSRF-Token': 'test' });`,
 };
 const stubUrl = code => 'data:text/javascript;base64,' + Buffer.from(code).toString('base64');
 
@@ -38,21 +39,36 @@ function buildModuleSource() {
     swap("'/scripts/slash-commands/SlashCommand.js'", `'${stubUrl(stubs.cmd)}'`);
     swap("'/scripts/slash-commands/SlashCommandArgument.js'", `'${stubUrl(stubs.arg)}'`);
     swap("'/script.js'", `'${stubUrl(stubs.script)}'`);
-    swap("'./lovense-client.js?v=16'", `'${pathToFileURL(new URL('./lovense-client.js', root).pathname)}'`);
-    swap("'./haptic-utils.js?v=16'", `'${pathToFileURL(new URL('./haptic-utils.js', root).pathname)}'`);
+    swap("'./lovense-client.js?v=17'", `'${pathToFileURL(new URL('./lovense-client.js', root).pathname)}'`);
+    swap("'./log-utils.js?v=17'", `'${pathToFileURL(new URL('./log-utils.js', root).pathname)}'`);
+    swap("'./haptic-utils.js?v=17'", `'${pathToFileURL(new URL('./haptic-utils.js', root).pathname)}'`);
     return src;
 }
 
 let counter = 0;
-async function boot({ settings = {}, nativeTools = true } = {}) {
+async function boot({ settings = {}, nativeTools = true, existingLog = null, uploadStatuses = [] } = {}) {
     const dom = new JSDOM('<!doctype html><body><div id="extensions_settings2"></div><div id="chat"></div></body>');
     globalThis.window = dom.window;
     globalThis.document = dom.window.document;
     dom.window.$ = jqueryFactory(dom.window);
-    dom.window.toastr = { info() {}, success() {}, error() {} };
+    const toasts = [];
+    const toast = level => (message, title, options) => toasts.push({ level, message, title, options });
+    dom.window.toastr = { info: toast('info'), success: toast('success'), error: toast('error') };
 
     const sent = [];
-    globalThis.fetch = async (url, init) => {
+    const uploads = []; // { name, text } for each /api/files/upload
+    globalThis.fetch = async (url, init = {}) => {
+        if (String(url).startsWith('/user/files/')) {
+            return existingLog !== null
+                ? { ok: true, status: 200, text: async () => existingLog }
+                : { ok: false, status: 404, text: async () => '' };
+        }
+        if (url === '/api/files/upload') {
+            const body = JSON.parse(init.body);
+            const status = uploadStatuses.length ? uploadStatuses.shift() : 200;
+            uploads.push({ name: body.name, status, text: Buffer.from(body.data, 'base64').toString('utf8') });
+            return { ok: status === 200, status, json: async () => ({ path: `user/files/${body.name}` }) };
+        }
         const body = JSON.parse(init.body);
         if (body.command !== 'GetToys') sent.push(body);
         return { ok: true, json: async () => ({ code: 200, data: { toys: '{}' } }) };
@@ -79,6 +95,8 @@ async function boot({ settings = {}, nativeTools = true } = {}) {
               <input id="lovense_developerToken"><input id="lovense_userId">
               <input type="checkbox" id="lovense_allowDelayedCommands">
               <input type="checkbox" id="lovense_enableHapticUnlock">
+              <input type="number" id="lovense_toastTimeoutSec"><input type="checkbox" id="lovense_saveLogToFile">
+              <button id="lovense_download_log"></button><button id="lovense_clear_log"></button>
               <span id="lovense_pending_count">0</span>
               <textarea id="lovense_customGuidelines"></textarea>
               <button id="lovense_reset_guidelines"></button><button id="lovense_test_connection"></button>
@@ -97,7 +115,7 @@ async function boot({ settings = {}, nativeTools = true } = {}) {
         await new Promise(r => setImmediate(r));
     };
     const flush = () => new Promise(r => setImmediate(r));
-    return { ctx, sent, tools, emit, flush, dom };
+    return { ctx, sent, tools, emit, flush, dom, toasts, uploads };
 }
 
 test.after(() => rmSync(tmpPath, { force: true }));
@@ -330,4 +348,108 @@ test('haptic unlock disabled: <redacted> tags are left alone', async () => {
     ctx.chat[0] = { is_user: false, mes };
     await emit('msg_recv', 0);
     assert.equal(ctx.chat[0].mes, mes);
+});
+
+// ---- toast duration + log file ---------------------------------------------------------------
+
+const tickAsync = async (ms) => { mock.timers.tick(ms); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r)); };
+
+test('toasts use the configured duration and a close button', async () => {
+    const { toasts } = await boot({ settings: { connectionMode: 'mock', toastTimeoutSec: 25 } });
+    const t = toasts.find(x => x.message.includes('Mock mode active'));
+    assert.ok(t, 'activation toast shown');
+    assert.equal(t.options.timeOut, 25000);
+    assert.equal(t.options.closeButton, true);
+});
+
+test('toast duration 0 = sticky; absurd values are clamped', async () => {
+    const sticky = await boot({ settings: { connectionMode: 'mock', toastTimeoutSec: 0 } });
+    assert.equal(sticky.toasts[0].options.timeOut, 0);
+    const huge = await boot({ settings: { connectionMode: 'mock', toastTimeoutSec: 99999 } });
+    assert.equal(huge.toasts[0].options.timeOut, 120000);
+});
+
+test('log file: commands are written (debounced) with timestamps and levels', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { tools, uploads } = await boot({ settings: { saveLogToFile: true } });
+        await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 9, duration: 5 });
+        await tools.control_lovense_toy.action({ action: 'Stop', strength: 0, duration: 1 });
+        assert.equal(uploads.length, 0, 'debounced, not written per line');
+        await tickAsync(2100);
+        assert.equal(uploads.length, 1);
+        assert.equal(uploads[0].name, 'lovense-integration.log');
+        assert.match(uploads[0].text, /\d{4}-\d\d-\d\dT[\d:.]+Z \[INFO\] Command: Vibrate @ 3 for 5s -> ok/);
+        assert.match(uploads[0].text, /\[INFO\] Stop: Stop @ 0/);
+        assert.match(uploads[0].text, /Extension activated/);
+    } finally { mock.timers.reset(); }
+});
+
+test('log file: toast messages are logged too', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { uploads } = await boot({ settings: { saveLogToFile: true, connectionMode: 'mock' } });
+        await tickAsync(2100);
+        assert.match(uploads.at(-1).text, /Lovense Integration: Mock mode active/);
+    } finally { mock.timers.reset(); }
+});
+
+test('log file: nothing is written while the option is off', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { tools, uploads } = await boot();
+        await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 1, duration: 5 });
+        await tickAsync(10000);
+        assert.equal(uploads.length, 0);
+    } finally { mock.timers.reset(); }
+});
+
+test('log file: existing history is preserved and written first', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { tools, uploads } = await boot({ settings: { saveLogToFile: true }, existingLog: 'OLD HISTORY LINE\n' });
+        await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 1, duration: 5 });
+        await tickAsync(2100);
+        assert.ok(uploads.at(-1).text.startsWith('OLD HISTORY LINE\n'));
+        assert.match(uploads.at(-1).text, /Command: Vibrate @ 1/);
+    } finally { mock.timers.reset(); }
+});
+
+test('log file: falls back to .txt if the server refuses the .log name', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { uploads } = await boot({ settings: { saveLogToFile: true }, uploadStatuses: [400] });
+        await tickAsync(2100);
+        assert.deepEqual(uploads.map(u => [u.name, u.status]), [['lovense-integration.log', 400], ['lovense-integration.txt', 200]]);
+    } finally { mock.timers.reset(); }
+});
+
+test('log file: upload failures never break commands', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { tools, sent, uploads } = await boot({ settings: { saveLogToFile: true }, uploadStatuses: [500, 500, 500] });
+        const res = await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 1, duration: 5 });
+        assert.equal(JSON.parse(res).status, 'success');
+        await tickAsync(2100);
+        assert.equal(sent.length, 1);
+        assert.ok(uploads.length >= 1);
+    } finally { mock.timers.reset(); }
+});
+
+test('settings: enabling the checkbox starts saving; changing duration is clamped and applied', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { dom, uploads, flush, toasts } = await boot({ settings: { connectionMode: 'mock' } });
+        const $ = dom.window.$;
+        assert.equal(uploads.length, 0);
+        $('#lovense_saveLogToFile').prop('checked', true).trigger('change');
+        await tickAsync(100); await flush();
+        assert.ok(uploads.length >= 1, 'enabling flushes the buffered log immediately');
+        assert.match(uploads.at(-1).text, /Log file saving enabled/);
+
+        $('#lovense_toastTimeoutSec').val('500').trigger('change');
+        assert.equal($('#lovense_toastTimeoutSec').val(), '120');
+        $('#lovense_stop_all').trigger('click');
+        assert.equal(toasts.at(-1).options.timeOut, 120000);
+    } finally { mock.timers.reset(); }
 });

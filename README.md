@@ -56,6 +56,16 @@ Enable these in the settings panel. When off, the AI is not told about them and 
   Tap again at any time (or use Stop All) to stop the toy and keep the text locked. Attribute values are whitelisted and clamped (action from a fixed list, strength 0-3, duration 1-60 s).
   The blur is cosmetic: the secret is still in the chat log and the page source.
 
+### Notifications and log file
+
+- **Notification duration** (settings panel, default 10 s): how long toasts stay on screen. `0` keeps them until you dismiss them with the X; the maximum is 120 s. Toasts also get a close button, and clicking the body no longer dismisses them.
+- **Save notifications and commands to a log file** (off by default): every toast plus every device event (commands sent, delayed commands scheduled/cancelled, Stop, unlock start/finish/abort, errors) is recorded as one timestamped line, e.g.
+  `2026-11-21T22:15:03.123Z [INFO] Command: Vibrate @ 2 for 5s -> ok`.
+  The file is `lovense-integration.log` in your SillyTavern user files folder (`data/<user>/user/files/`, e.g. `data/default-user/user/files/`). It is rewritten a couple of seconds after the last event, keeps history across reloads, and is capped at about 256 KB (oldest lines are dropped).
+  If your SillyTavern refuses the `.log` extension it automatically falls back to `lovense-integration.txt`.
+- **Download log** saves the current log from the browser even if file saving is off; **Clear log** empties it (and the file, if saving is on).
+- The log records timestamps of device activity, which is why it is opt-in. A browser extension can't append to a file directly, so the whole file is re-uploaded through SillyTavern's own files API; if that upload fails, commands are unaffected and the next event retries.
+
 ### Behaviour notes
 
 - Commands from the AI's *text* (fallback parser) only run for messages produced by a live generation. Re-rendering history (opening a chat, browsing swipes) never replays old commands.
@@ -139,7 +149,7 @@ python3 -m pytest test   # RemoteMCP tests (mock mode, no network)
 npm run callback-server  # optional: small Express server for Lovense callbacks
 ```
 
-`manifest.json` and the `?v=` query strings (currently `16`) on the imports in `index.js` act as cache-busters. Bump them together when you ship a change, or browsers may keep serving old scripts.
+`manifest.json` and the `?v=` query strings (currently `17`) on the imports in `index.js` act as cache-busters. Bump them together when you ship a change, or browsers may keep serving old scripts.
 
 ## Security Note
 
