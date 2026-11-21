@@ -97,6 +97,15 @@ Oscillate, Pulse, Wave, Fireworks, Earthquake, Stop`
 (Ferri HARD CAP 0-3 for ALL actions; legacy 1-20 / 1-100 rescaled;
 `duration 0` → 60s hold — same as `index.js`).
 
+> **Native tool vs. slash command actions:** All 12 actions work via
+> slash commands (`/lovense`), RemoteMCP, and the fallback parser
+> (JSON/XML blocks in AI text). However, the native function-calling
+> tool UI only exposes 6 preset actions in its schema:
+> `Vibrate`, `Pulse`, `Wave`, `Fireworks`, `Earthquake`, `Stop`.
+> The remaining actions (`Rotate`, `Pump`, `Thrusting`, `Fingering`,
+> `Suction`, `Oscillate`) are device-specific and are passed through
+> directly to the Lovense API when used via slash command or parser.
+
 ### Run
 
 ```bash
