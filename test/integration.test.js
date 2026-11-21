@@ -38,8 +38,8 @@ function buildModuleSource() {
     swap("'/scripts/slash-commands/SlashCommand.js'", `'${stubUrl(stubs.cmd)}'`);
     swap("'/scripts/slash-commands/SlashCommandArgument.js'", `'${stubUrl(stubs.arg)}'`);
     swap("'/script.js'", `'${stubUrl(stubs.script)}'`);
-    swap("'./lovense-client.js?v=15'", `'${pathToFileURL(new URL('./lovense-client.js', root).pathname)}'`);
-    swap("'./haptic-utils.js?v=15'", `'${pathToFileURL(new URL('./haptic-utils.js', root).pathname)}'`);
+    swap("'./lovense-client.js?v=16'", `'${pathToFileURL(new URL('./lovense-client.js', root).pathname)}'`);
+    swap("'./haptic-utils.js?v=16'", `'${pathToFileURL(new URL('./haptic-utils.js', root).pathname)}'`);
     return src;
 }
 

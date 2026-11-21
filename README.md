@@ -139,7 +139,7 @@ python3 -m pytest test   # RemoteMCP tests (mock mode, no network)
 npm run callback-server  # optional: small Express server for Lovense callbacks
 ```
 
-`manifest.json` and the `?v=` query strings on the imports in `index.js` act as cache-busters. Bump them together when you ship a change, or browsers may keep serving old scripts.
+`manifest.json` and the `?v=` query strings (currently `16`) on the imports in `index.js` act as cache-busters. Bump them together when you ship a change, or browsers may keep serving old scripts.
 
 ## Security Note
 

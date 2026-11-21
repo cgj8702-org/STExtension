@@ -72,7 +72,7 @@ def sanitize_duration(duration):
 class LovenseClient:
     """Mirror of JS LovenseClient (lovense-client.js)."""
 
-    def __init__(self, connection_mode="local", local_domain="127-0-0-1.lovense.club", local_port="30010", developer_token="", user_id="", verify_ssl=False, mock_toy_id=MOCK_TOY_ID):
+    def __init__(self, connection_mode="local", local_domain="127-0-0-1.lovense.club", local_port="30010", developer_token="", user_id="", verify_ssl=False, mock_toy_id=MOCK_TOY_ID):  # nosec B107 - empty default, not a hardcoded secret
         self.connection_mode = (connection_mode or "local").lower()
         self.local_domain = local_domain or "127-0-0-1.lovense.club"
         self.local_port = str(local_port or "30010")
@@ -176,7 +176,7 @@ class LovenseClient:
     def _post_server(self, payload):
         safe = dict(payload)
         if "token" in safe:
-            safe["token"] = "***"
+            safe["token"] = "***"  # nosec B105 - redacting the token for logs, not a secret
         logger.info("POST %s payload=%s", SERVER_COMMAND_URL, safe)
         resp = requests.post(SERVER_COMMAND_URL, json=payload, timeout=15)
         try:

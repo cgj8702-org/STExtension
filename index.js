@@ -1,9 +1,9 @@
 // @ts-nocheck
-import { LovenseClient } from './lovense-client.js?v=15';
+import { LovenseClient } from './lovense-client.js?v=16';
 import {
     clampStrength, clampDuration, clampDelay,
     convertRedactedTags, DelayedCommandQueue, createUnlockSession,
-} from './haptic-utils.js?v=15';
+} from './haptic-utils.js?v=16';
 import { SlashCommandParser } from '/scripts/slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '/scripts/slash-commands/SlashCommand.js';
 import { SlashCommandArgument, ARGUMENT_TYPE } from '/scripts/slash-commands/SlashCommandArgument.js';
