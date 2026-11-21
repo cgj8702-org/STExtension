@@ -73,10 +73,22 @@ Hannibal redacts secret thoughts, instructions, or confessions inside a custom H
 
 ## 📋 Handoff Checklist for Next Agent
 
-- [ ] Add `delay` parameter to `control_lovense_toy` tool schema in `index.js`.
-- [ ] Update `executeFallbackCommand` & `action` handler in `index.js` to handle `setTimeout` when `delay > 0`.
-- [ ] Add `<redacted>` tag regex parser to `registerParserHook`.
-- [ ] Add DOM blur & unlock button rendering logic in `index.js`.
-- [ ] Add CSS classes in `style.css` for blurred secrets and unlock progress.
-- [ ] Update `defaultSettings.customGuidelines` to document both landmines and redacted secrets.
-- [ ] Commit all changes to `main` git branch!
+- [x] Add `delay` parameter to `control_lovense_toy` tool schema in `index.js`.
+- [x] Update `executeFallbackCommand` & `action` handler in `index.js` to handle `setTimeout` when `delay > 0`.
+- [x] Add `<redacted>` tag regex parser to `registerParserHook`.
+- [x] Add DOM blur & unlock button rendering logic in `index.js`.
+- [x] Add CSS classes in `style.css` for blurred secrets and unlock progress.
+- [x] Update `defaultSettings.customGuidelines` to document both landmines and redacted secrets.
+- [x] Commit all changes to `main` git branch!
+
+
+---
+
+## Implementation notes (v1.1.0)
+
+- Logic lives in `haptic-utils.js` (pure, unit-tested); `index.js` wires it to SillyTavern.
+- **Deliberate deviation from the plan:** both features are opt-in settings (off by default), strength stays under the global 0-3 cap, and Stop / Stop All / chat change cancel pending delays and running unlocks. Unlock always needs a user-triggered start and can be aborted by the user.
+- The optional guideline text is appended dynamically only when the matching option is on, so users' edited guidelines are never overwritten.
+- **`<redacted>` is rewritten before render**: SillyTavern's sanitizer strips unknown tags, so `MESSAGE_RECEIVED` converts them to `<span class="lovense-redacted" data-lovense-*>`; the button is attached to the rendered DOM afterwards. The converted span is what is saved in the chat log.
+- Unlock progress is not persisted: reloading the chat re-locks the secret.
+- Work was committed on `feature/remotemcp-full-parity` rather than `main`.

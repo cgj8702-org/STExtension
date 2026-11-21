@@ -1,6 +1,25 @@
 export class LovenseClient {
     constructor(settings) {
         this.settings = settings;
+        // A hung Lovense Connect app / network must not leave a command (or a haptic unlock) waiting forever.
+        this.localTimeoutMs = 10000;
+        this.serverTimeoutMs = 15000;
+    }
+
+    /** fetch with an abort timeout. Rejects with a clear "timed out" error instead of hanging. */
+    async fetchWithTimeout(url, init, timeoutMs) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, { ...init, signal: controller.signal });
+        } catch (e) {
+            if (e?.name === 'AbortError') {
+                throw new Error(`Lovense request timed out after ${Math.round(timeoutMs / 1000)}s`);
+            }
+            throw e;
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     get isLocal() {
@@ -89,11 +108,11 @@ export class LovenseClient {
 
         if (toyId) payload.toy = toyId;
 
-        const response = await fetch(url, {
+        const response = await this.fetchWithTimeout(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        });
+        }, this.localTimeoutMs);
         return response.json();
     }
 
@@ -124,11 +143,11 @@ export class LovenseClient {
 
         if (toyId) payload.toy = toyId;
 
-        const response = await fetch(url, {
+        const response = await this.fetchWithTimeout(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        });
+        }, this.serverTimeoutMs);
         return response.json();
     }
 
