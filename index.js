@@ -1,12 +1,12 @@
 // @ts-nocheck
-import { LovenseClient } from './lovense-client.js?v=17';
+import { LovenseClient } from './lovense-client.js?v=18';
 import {
     clampStrength, clampDuration, clampDelay,
     convertRedactedTags, DelayedCommandQueue, createUnlockSession,
-} from './haptic-utils.js?v=17';
+} from './haptic-utils.js?v=18';
 import {
-    clampToastSeconds, toastOptions, formatLogLine, toBase64Utf8, LogFileWriter, DEFAULT_TOAST_SECONDS,
-} from './log-utils.js?v=17';
+    clampToastSeconds, toastOptions, toastrMethod, formatLogLine, toBase64Utf8, LogFileWriter, DEFAULT_TOAST_SECONDS,
+} from './log-utils.js?v=18';
 import { SlashCommandParser } from '/scripts/slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '/scripts/slash-commands/SlashCommand.js';
 import { SlashCommandArgument, ARGUMENT_TYPE } from '/scripts/slash-commands/SlashCommandArgument.js';
@@ -64,6 +64,7 @@ let client;
 let cachedToys = {};
 let stContext = null;
 let isNativeSupported = false;
+let isShutDown = false; // set by the disable/delete hooks so late async work can't re-arm anything
 let isDeviceOnline = null;
 let toyCacheInterval = null;
 
@@ -95,10 +96,10 @@ function logEvent(level, message, title = 'Lovense') {
     }
 }
 
-/** Toast with the user's chosen duration, and always record it in the log. */
-function notify(level, message, title = 'Lovense') {
-    logEvent(level, message, title);
-    const show = window.toastr?.[level];
+/** Toast with the user's chosen duration; also recorded in the log unless { log: false }. */
+function notify(level, message, title = 'Lovense', { log = true } = {}) {
+    if (log) logEvent(level, message, title);
+    const show = window.toastr?.[toastrMethod(level)];
     if (typeof show === 'function') {
         show.call(window.toastr, message, title, toastOptions(settings?.toastTimeoutSec));
     }
@@ -122,20 +123,43 @@ async function uploadLog(text) {
     }
 }
 
-/** Pull previously saved log text in front of this session's lines (once). */
-async function loadExistingLog() {
-    if (loadedExistingLog || !logWriter) return;
-    loadedExistingLog = true;
-    for (const name of [`${LOG_FILE_BASE}.log`, `${LOG_FILE_BASE}.txt`]) {
-        try {
-            const res = await fetch(`/user/files/${name}`, { cache: 'no-store' });
-            if (res.ok) {
-                logWriter.prepend(await res.text());
-                logFileName = name;
-                return;
+/**
+ * Existing-log load. The writer stays DISABLED until this finishes, so a session can never overwrite saved
+ * history with only its own lines. Only "file not found" counts as a fresh start; any other failure to read
+ * leaves saving off for this session ('unreadable') instead of risking the old history.
+ */
+let existingLogState = 'pending'; // 'pending' | 'ready' | 'unreadable'
+let existingLogPromise = null;
+
+function loadExistingLog() {
+    existingLogPromise ??= (async () => {
+        let state = 'ready';
+        let found = false;
+        for (const name of [`${LOG_FILE_BASE}.log`, `${LOG_FILE_BASE}.txt`]) {
+            try {
+                const res = await fetch(`/user/files/${name}`, { cache: 'no-store' });
+                if (res.ok) {
+                    const text = await res.text();
+                    if (/^\s*<(!doctype|html)/i.test(text)) continue; // an HTML fallback page, not our log
+                    logWriter?.prepend(text);
+                    logFileName = name;
+                    found = true;
+                    break;
+                }
+                if (res.status !== 404) state = 'unreadable';
+            } catch {
+                state = 'unreadable';
             }
-        } catch { /* no existing log - start fresh */ }
-    }
+        }
+        if (found) state = 'ready';
+        existingLogState = state;
+        if (state === 'unreadable') {
+            console.warn('[Lovense] Could not read the existing log file; not saving this session so it is not overwritten.');
+            notify('error', 'Could not read the existing log file, so the log will not be saved this session (to avoid overwriting it). Reload to retry.', 'Lovense');
+        }
+        logWriter?.schedule();
+    })();
+    return existingLogPromise;
 }
 
 function downloadLog() {
@@ -279,7 +303,7 @@ function stopToyCachePolling() {
 }
 
 async function updateToyCache() {
-    if (!client) return;
+    if (!client || isShutDown) return;
     try {
         const toys = await client.getToys();
         if (toys && !toys.error) {
@@ -393,7 +417,7 @@ ${guidelines}]`;
  * Update the prompt injection via setExtensionPrompt
  */
 function updateLovensePrompt() {
-    if (!stContext || !settings) return;
+    if (!stContext || !settings || isShutDown) return;
 
     const prompt = generateDynamicPrompt();
     setExtensionPrompt(
@@ -881,6 +905,7 @@ async function updateUI() {
         saveSettingsDebounced();
         if (settings.saveLogToFile) {
             await loadExistingLog();
+            if (existingLogState !== 'ready') return; // error toast already shown
             logEvent('info', 'Log file saving enabled', 'Log');
             await logWriter?.flush();
             if (logWriter?.lastError) {
@@ -999,11 +1024,18 @@ function registerLovenseSlashCommands() {
     }));
 }
 
+/**
+ * Register the native tool. This is deliberately NOT gated on isToolCallingSupported(): that value depends on the
+ * current API and the "Enable function calling" toggle, both of which can change after page load. SillyTavern only
+ * sends registered tools when function calling is actually available for the request.
+ */
 function registerLovenseTools() {
-    const { registerFunctionTool, isToolCallingSupported } = stContext;
-    if (!isToolCallingSupported()) return;
-
-    const isMock = settings.connectionMode === 'mock';
+    const { registerFunctionTool } = stContext;
+    if (typeof registerFunctionTool !== 'function') {
+        console.warn('[Lovense] registerFunctionTool is not available in this SillyTavern version.');
+        return;
+    }
+    const isMock = () => settings.connectionMode === 'mock';
 
     registerFunctionTool({
         name: 'control_lovense_toy',
@@ -1052,13 +1084,21 @@ function registerLovenseTools() {
                 messageCommands.push({ action, strength: sanitizedStrength, duration: finalDuration, toyId, loop: wantLoop });
             }
 
-            if (isMock) {
+            if (isMock()) {
                 console.log(`[Lovense Mock Tool] action=${action}, strength=${sanitizedStrength}, duration=${finalDuration}s, loop=${wantLoop}, delay=${finalDelay}s, toyId=${toyId || 'all'}`);
-                notify('info', 
-                    `${action} @ Lvl ${sanitizedStrength} for ${finalDuration}s${wantLoop ? ' (loop)' : ''}${finalDelay ? ` in ${finalDelay}s` : ''}`,
-                    'Lovense Mock (Tool Call)',
-                );
             }
+            // Shown through notify() so it honours the notification-duration setting. (ST's own formatMessage
+            // toast has a short fixed timeout, so formatMessage below returns '' to suppress it.) Not logged
+            // here: dispatchCommand logs the actual command result.
+            const isStop = String(action).toLowerCase() === 'stop';
+            notify(
+                'info',
+                isStop
+                    ? 'Stop'
+                    : `${action} @ Lvl ${sanitizedStrength} for ${finalDuration}s${wantLoop ? ' (loop)' : ''}${finalDelay ? ` in ${finalDelay}s` : ''}`,
+                isMock() ? 'Lovense Mock (Tool Call)' : 'Lovense',
+                { log: false },
+            );
 
             try {
                 const response = await dispatchCommand({ action, strength: sanitizedStrength, duration: finalDuration, toyId, delay: finalDelay });
@@ -1067,12 +1107,24 @@ function registerLovenseTools() {
                 return JSON.stringify({ status: "error", message: error.message });
             }
         },
-        formatMessage: ({ action, strength, loop, delay }) => {
-            const prefix = isMock ? '[Lovense Mock]' : '[Lovense]';
-            return `${prefix} Sending ${action} (Lvl ${strength})${loop ? ' looping' : ''}${delay ? ` in ${delay}s` : ''}...`;
-        },
+        formatMessage: () => '', // suppress ST's short-lived toast; the action shows its own (see above)
         stealth: false
     });
+}
+
+/** Run async startup work after the app is ready, so the activate hook (5s timeout, blocking loader) stays fast. */
+function runWhenAppReady(task) {
+    const { eventSource, event_types } = stContext;
+    let started = false;
+    const run = () => {
+        if (started) return;
+        started = true;
+        setTimeout(() => {
+            task().catch(e => console.warn('[Lovense] Deferred startup task failed:', e));
+        }, 0);
+    };
+    if (eventSource && event_types?.APP_READY) eventSource.on(event_types.APP_READY, run);
+    else run();
 }
 
 export async function onActivate() {
@@ -1084,10 +1136,9 @@ export async function onActivate() {
         client = new LovenseClient(settings);
         logWriter = new LogFileWriter({
             upload: uploadLog,
-            isEnabled: () => settings.saveLogToFile,
+            isEnabled: () => settings.saveLogToFile && existingLogState === 'ready',
             onError: e => console.warn('[Lovense] Could not save log file:', e.message || e),
         });
-        if (settings.saveLogToFile) await loadExistingLog();
         logEvent('info', `Extension activated (mode=${settings.connectionMode})`, 'Lovense');
 
         const isMock = settings.connectionMode === 'mock';
@@ -1096,28 +1147,61 @@ export async function onActivate() {
             notify('info', 'Mock mode active. Simulated toys loaded, no real API calls.', 'Lovense Integration');
         }
 
-        // Detect native tool support
-        isNativeSupported = stContext.isToolCallingSupported();
-        console.log(`[Lovense] Native Tool Calling supported: ${isNativeSupported}`);
+        // Informational only: this can change later (API switch / toggling function calling), so it never gates registration.
+        isNativeSupported = stContext.isToolCallingSupported?.() ?? false;
+        console.log(`[Lovense] Native Tool Calling currently supported: ${isNativeSupported}`);
 
         await updateUI();
         registerLovenseSlashCommands();
-
-        if (isNativeSupported) {
-            console.log("[Lovense] Registering native tool path...");
-            registerLovenseTools();
-        }
+        registerLovenseTools();
 
         // Always register the parser hook to clean up and execute any manual XML/JSON blocks outputted in text
         console.log("[Lovense] Enabling parser hook pipeline...");
         registerParserHook(client);
 
-        await updateToyCache();
-        updateLovensePrompt(); // Initial prompt injection
+        updateLovensePrompt(); // Initial prompt injection (fallback text until the toy list arrives)
         startToyCachePolling();
+
+        // Network work (toy list: up to 4s if Lovense Connect is down; saved log) must not hold up the loader.
+        runWhenAppReady(async () => {
+            if (settings.saveLogToFile) await loadExistingLog();
+            await updateToyCache();
+        });
 
         console.log('Lovense Toy Integration activated successfully');
     } catch (e) {
         console.error('Lovense Toy Integration failed to activate:', e);
     }
+}
+
+/** Disable/delete: stop the toy, cancel anything pending, and stop telling the model it can control a device. */
+function shutdown(reason) {
+    if (!stContext || !settings) return;
+    isShutDown = true;
+    try {
+        logEvent('info', `Extension ${reason}: stopping device and clearing pending activity`, 'Lovense');
+        stopToyCachePolling();
+        stopEverything();
+        setExtensionPrompt(EXTENSION_PROMPT_TAG, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+        stContext.unregisterFunctionTool?.('control_lovense_toy');
+        logWriter?.flush();
+    } catch (e) {
+        console.warn(`[Lovense] Cleanup on ${reason} failed:`, e);
+    }
+}
+
+export function onDisable() {
+    shutdown('disabled');
+}
+
+export function onDelete() {
+    shutdown('deleted');
+}
+
+export function onEnable() {
+    if (!stContext || !settings) return; // not loaded yet; onActivate does the setup on the next page load
+    isShutDown = false;
+    registerLovenseTools();
+    updateLovensePrompt();
+    startToyCachePolling();
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    clampToastSeconds, toastOptions, formatLogLine, trimLog, toBase64Utf8, LogFileWriter,
+    clampToastSeconds, toastOptions, toastrMethod, formatLogLine, trimLog, toBase64Utf8, LogFileWriter,
 } from '../log-utils.js';
 
 test('clampToastSeconds: 0 is allowed (sticky), garbage -> default, capped at 120', () => {
@@ -136,4 +136,13 @@ test('LogFileWriter: an append during an upload is written afterwards', async ()
     release();
     await new Promise(r => setImmediate(r));
     assert.deepEqual(writes, ['first\n', 'first\nsecond\n']);
+});
+
+test('toastrMethod: warn maps to the real toastr.warning; unknown levels fall back to info', () => {
+    assert.equal(toastrMethod('warn'), 'warning');
+    assert.equal(toastrMethod('WARNING'), 'warning');
+    assert.equal(toastrMethod('error'), 'error');
+    assert.equal(toastrMethod('success'), 'success');
+    assert.equal(toastrMethod('debug'), 'info');
+    assert.equal(toastrMethod(undefined), 'info');
 });
