@@ -39,26 +39,29 @@ function buildModuleSource() {
     swap("'/scripts/slash-commands/SlashCommand.js'", `'${stubUrl(stubs.cmd)}'`);
     swap("'/scripts/slash-commands/SlashCommandArgument.js'", `'${stubUrl(stubs.arg)}'`);
     swap("'/script.js'", `'${stubUrl(stubs.script)}'`);
-    swap("'./lovense-client.js?v=17'", `'${pathToFileURL(new URL('./lovense-client.js', root).pathname)}'`);
-    swap("'./log-utils.js?v=17'", `'${pathToFileURL(new URL('./log-utils.js', root).pathname)}'`);
-    swap("'./haptic-utils.js?v=17'", `'${pathToFileURL(new URL('./haptic-utils.js', root).pathname)}'`);
+    swap("'./lovense-client.js?v=18'", `'${pathToFileURL(new URL('./lovense-client.js', root).pathname)}'`);
+    swap("'./log-utils.js?v=18'", `'${pathToFileURL(new URL('./log-utils.js', root).pathname)}'`);
+    swap("'./haptic-utils.js?v=18'", `'${pathToFileURL(new URL('./haptic-utils.js', root).pathname)}'`);
     return src;
 }
 
 let counter = 0;
-async function boot({ settings = {}, nativeTools = true, existingLog = null, uploadStatuses = [] } = {}) {
+async function boot({ settings = {}, nativeTools = true, existingLog = null, existingLogStatus = null, existingLogGate = null, hangGetToys = false, uploadStatuses = [] } = {}) {
     const dom = new JSDOM('<!doctype html><body><div id="extensions_settings2"></div><div id="chat"></div></body>');
     globalThis.window = dom.window;
     globalThis.document = dom.window.document;
     dom.window.$ = jqueryFactory(dom.window);
     const toasts = [];
     const toast = level => (message, title, options) => toasts.push({ level, message, title, options });
-    dom.window.toastr = { info: toast('info'), success: toast('success'), error: toast('error') };
+    dom.window.toastr = { info: toast('info'), success: toast('success'), error: toast('error'), warning: toast('warning') };
 
+    const stats = { getToysCalls: 0, registers: 0, unregistered: [] };
     const sent = [];
     const uploads = []; // { name, text } for each /api/files/upload
     globalThis.fetch = async (url, init = {}) => {
         if (String(url).startsWith('/user/files/')) {
+            if (existingLogGate) await existingLogGate;
+            if (existingLogStatus) return { ok: false, status: existingLogStatus, text: async () => '' };
             return existingLog !== null
                 ? { ok: true, status: 200, text: async () => existingLog }
                 : { ok: false, status: 404, text: async () => '' };
@@ -70,7 +73,12 @@ async function boot({ settings = {}, nativeTools = true, existingLog = null, upl
             return { ok: status === 200, status, json: async () => ({ path: `user/files/${body.name}` }) };
         }
         const body = JSON.parse(init.body);
-        if (body.command !== 'GetToys') sent.push(body);
+        if (body.command === 'GetToys') {
+            stats.getToysCalls++;
+            if (hangGetToys) return new Promise(() => {}); // Lovense Connect not answering
+        } else {
+            sent.push(body);
+        }
         return { ok: true, json: async () => ({ code: 200, data: { toys: '{}' } }) };
     };
 
@@ -79,14 +87,16 @@ async function boot({ settings = {}, nativeTools = true, existingLog = null, upl
     const ctx = {
         extensionSettings: { lovense_integration: { connectionMode: 'local', ...settings } },
         chat: [],
-        eventSource: { on: (e, fn) => ((handlers[e] ??= []).push(fn)) },
+        // Real ST auto-fires APP_READY for listeners attached after the app is ready.
+        eventSource: { on: (e, fn) => { (handlers[e] ??= []).push(fn); if (e === 'app_ready') fn(); } },
         event_types: {
             MESSAGE_RECEIVED: 'msg_recv', CHARACTER_MESSAGE_RENDERED: 'char_render',
             GENERATION_STARTED: 'gen_start', GENERATION_ENDED: 'gen_end',
-            GENERATION_STOPPED: 'gen_stop', CHAT_CHANGED: 'chat_changed',
+            GENERATION_STOPPED: 'gen_stop', CHAT_CHANGED: 'chat_changed', APP_READY: 'app_ready',
         },
         isToolCallingSupported: () => nativeTools,
-        registerFunctionTool: t => { tools[t.name] = t; },
+        registerFunctionTool: t => { tools[t.name] = t; stats.registers++; },
+        unregisterFunctionTool: n => { stats.unregistered.push(n); delete tools[n]; },
         saveSettingsDebounced() {},
         renderExtensionTemplateAsync: async () => `
             <div class="lovense-integration-settings">
@@ -115,10 +125,13 @@ async function boot({ settings = {}, nativeTools = true, existingLog = null, upl
         await new Promise(r => setImmediate(r));
     };
     const flush = () => new Promise(r => setImmediate(r));
-    return { ctx, sent, tools, emit, flush, dom, toasts, uploads };
+    return { ctx, sent, tools, emit, flush, dom, toasts, uploads, stats, mod };
 }
 
 test.after(() => rmSync(tmpPath, { force: true }));
+// Deferred startup tasks from a previous test (real setTimeout(0)) must settle before the next test boots,
+// or they would call the next test's fetch stub.
+test.afterEach(async () => { await new Promise(r => setTimeout(r, 10)); });
 
 test('tool call: strength and duration are hard-clamped in the HTTP payload', async () => {
     const { tools, sent } = await boot();
@@ -350,6 +363,8 @@ test('haptic unlock disabled: <redacted> tags are left alone', async () => {
     assert.equal(ctx.chat[0].mes, mes);
 });
 
+const bootLog = async opts => { const b = await boot(opts); await tickAsync(0); return b; };
+
 // ---- toast duration + log file ---------------------------------------------------------------
 
 const tickAsync = async (ms) => { mock.timers.tick(ms); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r)); };
@@ -372,7 +387,7 @@ test('toast duration 0 = sticky; absurd values are clamped', async () => {
 test('log file: commands are written (debounced) with timestamps and levels', async () => {
     mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     try {
-        const { tools, uploads } = await boot({ settings: { saveLogToFile: true } });
+        const { tools, uploads } = await bootLog({ settings: { saveLogToFile: true } });
         await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 9, duration: 5 });
         await tools.control_lovense_toy.action({ action: 'Stop', strength: 0, duration: 1 });
         assert.equal(uploads.length, 0, 'debounced, not written per line');
@@ -388,7 +403,7 @@ test('log file: commands are written (debounced) with timestamps and levels', as
 test('log file: toast messages are logged too', async () => {
     mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     try {
-        const { uploads } = await boot({ settings: { saveLogToFile: true, connectionMode: 'mock' } });
+        const { uploads } = await bootLog({ settings: { saveLogToFile: true, connectionMode: 'mock' } });
         await tickAsync(2100);
         assert.match(uploads.at(-1).text, /Lovense Integration: Mock mode active/);
     } finally { mock.timers.reset(); }
@@ -407,7 +422,7 @@ test('log file: nothing is written while the option is off', async () => {
 test('log file: existing history is preserved and written first', async () => {
     mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     try {
-        const { tools, uploads } = await boot({ settings: { saveLogToFile: true }, existingLog: 'OLD HISTORY LINE\n' });
+        const { tools, uploads } = await bootLog({ settings: { saveLogToFile: true }, existingLog: 'OLD HISTORY LINE\n' });
         await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 1, duration: 5 });
         await tickAsync(2100);
         assert.ok(uploads.at(-1).text.startsWith('OLD HISTORY LINE\n'));
@@ -418,7 +433,7 @@ test('log file: existing history is preserved and written first', async () => {
 test('log file: falls back to .txt if the server refuses the .log name', async () => {
     mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     try {
-        const { uploads } = await boot({ settings: { saveLogToFile: true }, uploadStatuses: [400] });
+        const { uploads } = await bootLog({ settings: { saveLogToFile: true }, uploadStatuses: [400] });
         await tickAsync(2100);
         assert.deepEqual(uploads.map(u => [u.name, u.status]), [['lovense-integration.log', 400], ['lovense-integration.txt', 200]]);
     } finally { mock.timers.reset(); }
@@ -427,7 +442,7 @@ test('log file: falls back to .txt if the server refuses the .log name', async (
 test('log file: upload failures never break commands', async () => {
     mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     try {
-        const { tools, sent, uploads } = await boot({ settings: { saveLogToFile: true }, uploadStatuses: [500, 500, 500] });
+        const { tools, sent, uploads } = await bootLog({ settings: { saveLogToFile: true }, uploadStatuses: [500, 500, 500] });
         const res = await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 1, duration: 5 });
         assert.equal(JSON.parse(res).status, 'success');
         await tickAsync(2100);
@@ -452,4 +467,124 @@ test('settings: enabling the checkbox starts saving; changing duration is clampe
         $('#lovense_stop_all').trigger('click');
         assert.equal(toasts.at(-1).options.timeOut, 120000);
     } finally { mock.timers.reset(); }
+});
+
+// ---- fixes from the SillyTavern contributor docs review ---------------------------------------
+
+test('tool registers even if function calling is OFF at page load (and is not gated on it)', async () => {
+    const { tools, stats } = await boot({ nativeTools: false });
+    assert.ok(tools.control_lovense_toy, 'tool must be registered regardless of isToolCallingSupported()');
+    assert.equal(stats.registers, 1);
+});
+
+test("tool formatMessage is empty (suppresses ST's short toast); the action toast honours the duration", async () => {
+    const { tools, toasts } = await boot({ settings: { toastTimeoutSec: 33 } });
+    assert.equal(tools.control_lovense_toy.formatMessage({ action: 'Vibrate', strength: 2 }), '');
+    await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 2, duration: 5 });
+    const t = toasts.find(x => x.message.startsWith('Vibrate @ Lvl 2 for 5s'));
+    assert.ok(t, 'action shows its own toast');
+    assert.equal(t.options.timeOut, 33000);
+    assert.equal(t.options.closeButton, true);
+});
+
+test('startup: activation does not wait on Lovense Connect (hung toy query)', async () => {
+    const started = Date.now();
+    const result = await Promise.race([
+        boot({ hangGetToys: true }).then(() => 'booted'),
+        new Promise(r => setTimeout(() => r('timeout'), 1500)),
+    ]);
+    assert.equal(result, 'booted');
+    assert.ok(Date.now() - started < 1500);
+});
+
+test('startup: the toy query is deferred until after activation (APP_READY), not made inside it', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { stats } = await boot();
+        assert.equal(stats.getToysCalls, 0, 'nothing network-bound during the activate hook');
+        await tickAsync(0);
+        assert.equal(stats.getToysCalls, 1);
+    } finally { mock.timers.reset(); }
+});
+
+test('log safety: nothing is uploaded until the existing log has been read (history is never overwritten)', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        let release;
+        const gate = new Promise(r => { release = r; });
+        const { tools, uploads } = await boot({ settings: { saveLogToFile: true }, existingLog: 'PRECIOUS HISTORY\n', existingLogGate: gate });
+        await tickAsync(0);
+        await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 1, duration: 5 });
+        await tickAsync(10000);
+        assert.equal(uploads.length, 0, 'must not write while the old log is still loading');
+        release();
+        await tickAsync(0);
+        await tickAsync(2100);
+        assert.equal(uploads.length, 1);
+        assert.ok(uploads[0].text.startsWith('PRECIOUS HISTORY\n'));
+    } finally { mock.timers.reset(); }
+});
+
+test('log safety: if the existing log cannot be read (not a 404), saving is off for the session and an error is shown', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { tools, uploads, toasts } = await boot({ settings: { saveLogToFile: true }, existingLogStatus: 500 });
+        await tickAsync(0);
+        await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 1, duration: 5 });
+        await tickAsync(20000);
+        assert.equal(uploads.length, 0);
+        assert.ok(toasts.some(t => t.level === 'error' && /existing log/.test(t.message)));
+    } finally { mock.timers.reset(); }
+});
+
+test('log safety: a missing file (404) is a normal fresh start', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { uploads } = await boot({ settings: { saveLogToFile: true } });
+        await tickAsync(0);
+        await tickAsync(2100);
+        assert.equal(uploads.length, 1);
+    } finally { mock.timers.reset(); }
+});
+
+test('log safety: an HTML fallback page is not mistaken for the log', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { uploads } = await boot({ settings: { saveLogToFile: true }, existingLog: '<!DOCTYPE html><html>oops</html>' });
+        await tickAsync(0);
+        await tickAsync(2100);
+        assert.ok(!uploads.at(-1).text.includes('DOCTYPE'));
+    } finally { mock.timers.reset(); }
+});
+
+test('onDisable: stops the toy, cancels delayed commands, clears the prompt, unregisters the tool', async () => {
+    mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    try {
+        const { tools, sent, mod, stats, flush } = await boot({ settings: { allowDelayedCommands: true } });
+        await tools.control_lovense_toy.action({ action: 'Vibrate', strength: 1, duration: 5, delay: 30 });
+        mod.onDisable();
+        await flush();
+        mock.timers.tick(60000); await flush();
+        assert.deepEqual(sent.map(p => p.action), ['Stop'], 'only the Stop; the delayed command never fires');
+        assert.equal(await latestPrompt(), '', 'model is no longer told it can control a toy');
+        assert.deepEqual(stats.unregistered, ['control_lovense_toy']);
+    } finally { mock.timers.reset(); }
+});
+
+test('onDelete behaves like onDisable; onEnable restores the tool and prompt', async () => {
+    const { mod, stats, tools } = await boot();
+    mod.onDelete();
+    assert.equal(tools.control_lovense_toy, undefined);
+    mod.onEnable();
+    assert.ok(tools.control_lovense_toy);
+    assert.equal(stats.registers, 2);
+    assert.match(await latestPrompt(), /LOVENSE SYSTEM INSTRUCTION/);
+});
+
+test('hooks before activation are harmless no-ops', async () => {
+    const dom = new JSDOM('<body></body>');
+    globalThis.window = dom.window;
+    writeFileSync(tmpPath, buildModuleSource());
+    const fresh = await import(`${tmpPath.href}?n=${++counter}`);
+    assert.doesNotThrow(() => { fresh.onDisable(); fresh.onDelete(); fresh.onEnable(); });
 });

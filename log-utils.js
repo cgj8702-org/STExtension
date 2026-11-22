@@ -26,6 +26,13 @@ export function toastOptions(seconds) {
     };
 }
 
+/** Map our level names onto real toastr method names ('warn' is not one; 'warning' is). */
+export function toastrMethod(level) {
+    const l = String(level ?? '').toLowerCase();
+    if (l === 'warn' || l === 'warning') return 'warning';
+    return ['info', 'success', 'error'].includes(l) ? l : 'info';
+}
+
 /** One log line: `2026-11-21T22:15:03.123Z [INFO] Title: message` (newlines flattened). */
 export function formatLogLine(level, message, title = '', date = new Date()) {
     const flat = String(message ?? '').replace(/\s*\r?\n\s*/g, ' | ');

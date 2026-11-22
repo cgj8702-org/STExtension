@@ -69,6 +69,11 @@ Enable these in the settings panel. When off, the AI is not told about them and 
 ### Behaviour notes
 
 - Commands from the AI's *text* (fallback parser) only run for messages produced by a live generation. Re-rendering history (opening a chat, browsing swipes) never replays old commands.
+- The `control_lovense_toy` tool is registered at startup regardless of whether function calling is currently enabled; SillyTavern only sends it when function calling is actually available, so turning that on or switching API later works without a reload.
+- SillyTavern's own "tool is running" toast is suppressed (`formatMessage` returns an empty string); the extension shows its own toast instead, which follows your notification-duration setting.
+- Startup is kept fast: the toy list and saved log are loaded after SillyTavern is ready, so an unresponsive Lovense Connect no longer holds up the loading screen.
+- Disabling or deleting the extension stops the toy, cancels pending delayed commands, unregisters the tool and stops telling the model it can control a device.
+- The log is never overwritten by a session that hasn't read it: saving waits until the existing file is read, and if it can't be read (anything other than "not found") saving stays off for that session and you get an error toast.
 - A fire-once command is **not** stopped when the AI's reply finishes; it runs for its `duration`. Only an explicit Stop, or replacing a running `loop=true` replay, sends a device Stop.
 
 ## RemoteMCP (standalone MCP server)
@@ -158,7 +163,7 @@ python3 -m pytest test   # RemoteMCP tests (mock mode, no network)
 npm run callback-server  # optional: small Express server for Lovense callbacks
 ```
 
-`manifest.json` and the `?v=` query strings (currently `17`) on the imports in `index.js` act as cache-busters. Bump them together when you ship a change, or browsers may keep serving old scripts.
+`manifest.json` and the `?v=` query strings (currently `18`) on the imports in `index.js` act as cache-busters. Bump them together when you ship a change, or browsers may keep serving old scripts.
 
 ## Security Note
 
